@@ -1,0 +1,15 @@
+[package]
+name = "mock"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+once_cell = "1.12.0"
+parking_lot = "0.12.1"
+static_assertions = "1.1.0"
+thread_local = "1.1.4"
+
+mock-derive = { version = "0.1.0", path = "derive" }
+
+[workspace]
+members = [".", "derive"]

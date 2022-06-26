@@ -1,12 +1,12 @@
 use once_cell::sync::OnceCell;
 
+#[cfg(feature = "shared")]
 mod shared;
 mod tls;
 
-pub use crate::{
-    shared::{Shared, SharedGuard, SharedRef},
-    tls::{ThreadLocal, ThreadLocalGuard, ThreadLocalRef},
-};
+#[cfg(feature = "shared")]
+pub use crate::shared::{Shared, SharedGuard, SharedRef};
+pub use crate::tls::{ThreadLocal, ThreadLocalGuard, ThreadLocalRef};
 pub use mimicry_derive::{mock, Mock};
 
 use core::{

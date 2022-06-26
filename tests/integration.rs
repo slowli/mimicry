@@ -10,7 +10,7 @@ fn mock_basics() {
     }
 
     #[derive(Default, Mock)]
-    #[cfg_attr(shared_mocks, mock(shared))]
+    #[cfg_attr(feature = "shared", mock(shared))]
     struct SearchMock {
         called_times: usize,
     }
@@ -55,7 +55,7 @@ fn mock_with_lifetimes() {
     }
 
     #[derive(Default, Mock)]
-    #[cfg_attr(shared_mocks, mock(shared))]
+    #[cfg_attr(feature = "shared", mock(shared))]
     struct TailMock;
 
     impl TailMock {
@@ -86,7 +86,7 @@ fn mock_consuming_args() {
     }
 
     #[derive(Default, Mock)]
-    #[cfg_attr(shared_mocks, mock(shared))]
+    #[cfg_attr(feature = "shared", mock(shared))]
     struct ConsumeMock;
 
     impl ConsumeMock {
@@ -125,7 +125,7 @@ fn mock_for_generic_function() {
     }
 
     #[derive(Default, Mock)]
-    #[cfg_attr(shared_mocks, mock(shared))]
+    #[cfg_attr(feature = "shared", mock(shared))]
     struct GenericMock {
         len_args: Vec<String>,
         get_key_responses: Vec<usize>,
@@ -187,7 +187,7 @@ fn mock_in_impl() {
     }
 
     #[derive(Mock)]
-    #[cfg_attr(shared_mocks, mock(shared))]
+    #[cfg_attr(feature = "shared", mock(shared))]
     struct LenMock {
         min_length: usize,
     }
@@ -258,7 +258,7 @@ fn mock_in_impl_trait() {
     }
 
     #[derive(Default, Mock)]
-    #[cfg_attr(shared_mocks, mock(shared))]
+    #[cfg_attr(feature = "shared", mock(shared))]
     struct IterMock {
         count: usize,
     }
@@ -298,7 +298,7 @@ fn recursive_fn() {
     }
 
     #[derive(Default, Mock)]
-    #[cfg_attr(shared_mocks, mock(shared))]
+    #[cfg_attr(feature = "shared", mock(shared))]
     struct FactorialMock {
         fallback_once: bool,
     }
@@ -332,6 +332,7 @@ fn recursive_fn() {
     assert_eq!(factorial(10, &mut 1), 151200);
 }
 
+#[cfg(feature = "shared")]
 #[test]
 #[allow(clippy::needless_collect)] // needed for threads to be spawned concurrently
 fn single_shared_mock_in_multi_thread_env() {

@@ -1,6 +1,6 @@
 use std::{borrow::Borrow, collections::HashMap, hash::Hash, thread};
 
-use mock::{mock, Context, HandleMock, Mock};
+use mimicry::{mock, Context, HandleMock, Mock};
 
 #[test]
 fn mock_basics() {

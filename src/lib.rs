@@ -7,7 +7,7 @@ pub use crate::{
     shared::{Shared, SharedGuard, SharedRef},
     tls::{ThreadLocal, ThreadLocalGuard, ThreadLocalRef},
 };
-pub use mock_derive::{mock, Mock};
+pub use mimicry_derive::{mock, Mock};
 
 use core::{
     cell::{Cell, RefCell, RefMut},

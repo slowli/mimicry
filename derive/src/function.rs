@@ -11,7 +11,7 @@ use syn::{
 
 use std::mem;
 
-use crate::utils::receiver_span;
+use crate::util::receiver_span;
 
 #[derive(Debug, FromMeta)]
 struct FunctionAttrs {
@@ -126,14 +126,14 @@ impl FunctionWrapper {
 
         quote! {
             std::thread_local! {
-                static __FALLBACK: mock::FallbackSwitch = mock::FallbackSwitch::default();
+                static __FALLBACK: mimicry::FallbackSwitch = mimicry::FallbackSwitch::default();
             }
 
-            if !__FALLBACK.with(mock::FallbackSwitch::is_active) {
-                let instance = <#state as mock::Mock>::instance();
-                if let Some(mock_ref) = mock::HandleMock::get(instance) {
+            if !__FALLBACK.with(mimicry::FallbackSwitch::is_active) {
+                let instance = <#state as mimicry::Mock>::instance();
+                if let Some(mock_ref) = mimicry::HandleMock::get(instance) {
                     return __FALLBACK.with(|fallback| {
-                        mock::CallMock::call_mock(
+                        mimicry::CallMock::call_mock(
                             mock_ref,
                             fallback,
                             |cx| #state::#mock_fn(cx, #recv #(#args,)*),
@@ -268,18 +268,21 @@ mod tests {
         let fallback_logic = wrapper.fallback_logic();
         let fallback_flag: syn::Block = syn::parse_quote!({ #fallback_logic });
 
+        #[rustfmt::skip] // formatting removes the necessary trailing comma
         let expected: syn::Block = syn::parse_quote!({
             std::thread_local! {
-                static __FALLBACK: mock::FallbackSwitch = mock::FallbackSwitch::default();
+                static __FALLBACK: mimicry::FallbackSwitch = mimicry::FallbackSwitch::default();
             }
 
-            if !__FALLBACK.with(mock::FallbackSwitch::is_active) {
-                let instance = <TestMock as mock::Mock>::instance();
-                if let Some(mock_ref) = mock::HandleMock::get(instance) {
+            if !__FALLBACK.with(mimicry::FallbackSwitch::is_active) {
+                let instance = <TestMock as mimicry::Mock>::instance();
+                if let Some(mock_ref) = mimicry::HandleMock::get(instance) {
                     return __FALLBACK.with(|fallback| {
-                        mock::CallMock::call_mock(mock_ref, fallback, |cx| {
-                            TestMock::mock_test(cx, __arg0, __arg1)
-                        })
+                        mimicry::CallMock::call_mock(
+                            mock_ref,
+                            fallback,
+                            |cx| TestMock::mock_test(cx, __arg0, __arg1,),
+                        )
                     });
                 }
             }

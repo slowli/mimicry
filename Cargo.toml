@@ -1,15 +1,17 @@
 [package]
-name = "mock"
+name = "mimicry"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 once_cell = "1.12.0"
-parking_lot = "0.12.1"
-static_assertions = "1.1.0"
+parking_lot = "0.12.1" # TODO: optional
 thread_local = "1.1.4"
 
-mock-derive = { version = "0.1.0", path = "derive" }
+mimicry-derive = { version = "0.1.0", path = "derive" }
+
+[dev-dependencies]
+static_assertions = "1.1.0"
 
 [workspace]
 members = [".", "derive"]

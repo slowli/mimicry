@@ -5,7 +5,7 @@ use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{parse_quote, spanned::Spanned, DeriveInput, GenericParam, Generics, Ident};
 
-use crate::utils::find_meta_attrs;
+use crate::util::find_meta_attrs;
 
 #[derive(Debug, Default, FromMeta)]
 struct MockAttrs {
@@ -23,9 +23,9 @@ impl Mock {
     fn impl_mock(&self) -> impl ToTokens {
         let ident = &self.ident;
         let wrapper = if self.shared {
-            quote!(mock::Shared)
+            quote!(mimicry::Shared)
         } else {
-            quote!(mock::ThreadLocal)
+            quote!(mimicry::ThreadLocal)
         };
 
         let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
@@ -36,11 +36,11 @@ impl Mock {
             .push(parse_quote!(#wrapper<Self>: Send + Sync));
 
         quote! {
-            impl #impl_generics mock::Mock for #ident #ty_generics #where_clause {
+            impl #impl_generics mimicry::Mock for #ident #ty_generics #where_clause {
                 type Shared = #wrapper<Self>;
 
-                fn instance() -> &'static mock::Static<Self::Shared> {
-                    static SHARED: mock::Static<#shared_ty> = mock::Static::new();
+                fn instance() -> &'static mimicry::Static<Self::Shared> {
+                    static SHARED: mimicry::Static<#shared_ty> = mimicry::Static::new();
                     &SHARED
                 }
             }

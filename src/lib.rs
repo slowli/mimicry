@@ -67,7 +67,7 @@
 //!     // The mock impl receives same args as the mocked function
 //!     // with the additional context parameter that allows
 //!     // accessing the mock state and controlling mock / real function switches.
-//!     fn mock_search(
+//!     fn search(
 //!         mut ctx: Context<'_, Self>,
 //!         haystack: &str,
 //!         needle: char,
@@ -92,6 +92,56 @@
 //! assert_eq!(search("needle?", 'd'), Some(3));
 //! let recovered = guard.into_inner();
 //! assert_eq!(recovered.called_times, 4);
+//! ```
+//!
+//! ## On impl blocks
+//!
+//! The `mock` attribute can be placed on impl blocks (including trait implementations)
+//! to apply a mock to all methods in the block:
+//!
+//! ```
+//! # use mimicry::{mock, Context, Mock};
+//! struct Tested(String);
+//!
+//! #[mock(using = "TestMock")]
+//! impl Tested {
+//!     fn len(&self) -> usize { self.0.len() }
+//!
+//!     fn push(&mut self, s: impl AsRef<str>) -> &mut Self {
+//!         self.0.push_str(s.as_ref());
+//!         self
+//!     }
+//! }
+//!
+//! #[mock(using = "TestMock", rename = "impl_{}")]
+//! impl AsRef<str> for Tested {
+//!     fn as_ref(&self) -> &str {
+//!         &self.0
+//!     }
+//! }
+//!
+//! #[derive(Mock)]
+//! struct TestMock { /* ... */ }
+//! impl TestMock {
+//!     fn len(ctx: Context<'_, Self>, recv: &Tested) -> usize {
+//!         // ...
+//!         # 0
+//!     }
+//!
+//!     fn push<'s>(
+//!         ctx: Context<'_, Self>,
+//!         recv: &'s mut Tested,
+//!         s: impl AsRef<str>,
+//!     ) -> &'s mut Tested {
+//!         // ...
+//!         # recv
+//!     }
+//!
+//!     fn impl_as_ref<'s>(ctx: Context<'_, Self>, recv: &'s Tested) -> &'s str {
+//!         // ...
+//!         # ""
+//!     }
+//! }
 //! ```
 //!
 //! ## What can('t) be mocked?

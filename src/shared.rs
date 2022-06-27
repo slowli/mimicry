@@ -39,7 +39,7 @@ use crate::{CallMock, Context, FallbackSwitch, GetMock, LockMock, SetMock};
 /// }
 ///
 /// impl MockState {
-///     fn mock_answer(mut ctx: Context<'_, Self>) -> u32 {
+///     fn answer(mut ctx: Context<'_, Self>) -> u32 {
 ///         let counter = ctx.state().counter;
 ///         ctx.state().counter += 1;
 ///         counter

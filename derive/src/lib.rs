@@ -61,11 +61,22 @@ pub fn mock_derive(input: TokenStream) -> TokenStream {
 /// in the path: if it starts with an uppercase letter, it is considered a mock state type;
 /// otherwise, it is considered a type + function.
 ///
+/// ## `rename`
+///
+/// Specifies a pattern to use when accessing mock impl methods. A pattern is a string with `{}`
+/// denoting a placeholder for the mocked function name.
+///
+/// This attribute is mostly useful for impl blocks.
+///
 /// # Supported items
 ///
-/// The attribute can be used on functions / methods. Pretty much all signatures are supported
-/// (e.g., generic functions, non-`'static` args, return types with dependent / elided lifetime,
-/// etc. `const` functions are not supported.
+/// The `mock` attribute can be used on functions / methods. Pretty much all signatures
+/// are supported, e.g., generic functions, non-`'static` args, return types
+/// with dependent / elided lifetime, etc. `const` functions are not supported.
+///
+/// The `mock` attribute can also be placed on an impl block (including a trait implementation).
+/// In this case, it will apply to all methods in the block. If necessary, mocking options can
+/// be overridden for separate methods in the block by adding a `mock` attribute on them.
 ///
 /// [path]: syn::Path
 #[proc_macro_attribute]

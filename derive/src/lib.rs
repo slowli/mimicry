@@ -14,7 +14,7 @@ extern crate proc_macro;
 
 mod function;
 mod mock_impl;
-mod util;
+mod utils;
 
 use proc_macro::TokenStream;
 

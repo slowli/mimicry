@@ -11,7 +11,7 @@ use syn::{
 
 use std::mem;
 
-use crate::util::{find_meta_attrs, receiver_span};
+use crate::utils::{find_meta_attrs, receiver_span};
 
 #[derive(Debug, FromMeta)]
 struct FunctionAttrs {

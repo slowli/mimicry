@@ -5,7 +5,7 @@ use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
 use syn::{parse_quote, spanned::Spanned, DeriveInput, GenericParam, Generics, Ident};
 
-use crate::util::find_meta_attrs;
+use crate::utils::find_meta_attrs;
 
 #[derive(Debug, Default, FromMeta)]
 struct MockAttrs {

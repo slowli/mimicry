@@ -4,13 +4,16 @@ use parking_lot::{Mutex, MutexGuard, ReentrantMutex, ReentrantMutexGuard};
 
 use core::cell::RefCell;
 
-use crate::{CallMock, Context, FallbackSwitch, GetMock, SetMock};
+use crate::{CallMock, Context, FallbackSwitch, GetMock, LockMock, SetMock};
 
 /// Wrapper around [`Mock`](crate::Mock) state that provides cross-thread synchronization.
 ///
+/// This type rarely needs to be used directly; `#[derive(Mock)]` macro with a `#[mock(shared)]`
+/// attribute on the container will set it up automatically.
+///
 /// Unlike [`ThreadLocal`](crate::ThreadLocal) wrapper, this one shares the state across
-/// threads, with state synchronization via [`ReentrantMutex`]es (to allow for recursive calls).
-/// Setting the state is synchronized via a [`Mutex`] as well: while one test thread
+/// threads, with state synchronization via reentrant mutexes (to allow for recursive calls).
+/// Setting the state is synchronized via a mutex as well: while one test thread
 /// has a [`SharedGuard`], other tests attempting to set the state will block.
 ///
 /// # Pitfalls
@@ -20,7 +23,7 @@ use crate::{CallMock, Context, FallbackSwitch, GetMock, SetMock};
 /// you want, and there are ways to deal with this issue:
 ///
 /// - Run tests one at a time via `cargo test -j 1`.
-/// - FIXME: describe locking w/o setting the state
+/// - Call [`LockMock::lock()`] at the beginning of the relevant tests.
 ///
 /// # Examples
 ///
@@ -29,7 +32,8 @@ use crate::{CallMock, Context, FallbackSwitch, GetMock, SetMock};
 /// # use std::{collections::HashSet, thread};
 ///
 /// #[derive(Debug, Default, Mock)]
-/// #[mock(shared)] // necessary to use the shared wrapper.
+/// #[mock(shared)]
+/// // ^ use the `Shared` wrapper instead of the default thread-local one
 /// struct MockState {
 ///     counter: u32,
 /// }
@@ -111,6 +115,14 @@ impl<'a, T: 'static> SetMock<'a, T> for Shared<T> {
             _guard: guard,
             mock: self,
         }
+    }
+}
+
+impl<'a, T: 'static> LockMock<'a, T> for Shared<T> {
+    type EmptyGuard = MutexGuard<'a, ()>;
+
+    fn lock(&'a self) -> Self::EmptyGuard {
+        self.write_lock.lock()
     }
 }
 

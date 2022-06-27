@@ -1,5 +1,7 @@
 use std::{borrow::Borrow, collections::HashMap, hash::Hash, thread};
 
+#[cfg(feature = "shared")]
+use mimicry::LockMock;
 use mimicry::{mock, Context, Mock, SetMock};
 
 #[test]
@@ -376,7 +378,7 @@ fn per_thread_mock_in_multi_thread_env() {
     }
 
     #[derive(Default, Mock)]
-    #[cfg_attr(shared_mocks, mock(shared))]
+    #[cfg_attr(feature = "shared", mock(shared))]
     struct ValueMock(u32);
 
     impl ValueMock {
@@ -402,4 +404,48 @@ fn per_thread_mock_in_multi_thread_env() {
     for range in ranges {
         assert_eq!(range, expected_range);
     }
+}
+
+#[cfg(feature = "shared")]
+#[test]
+fn locking_shared_mocks() {
+    use std::time::Duration;
+
+    #[mock(using = "ValueMock")]
+    fn value() -> u32 {
+        0
+    }
+
+    #[derive(Mock)]
+    #[mock(shared)]
+    struct ValueMock(u32);
+
+    impl ValueMock {
+        fn mock_value(mut cx: Context<'_, Self>) -> u32 {
+            let value = cx.state().0;
+            cx.state().0 += 1;
+            value
+        }
+    }
+
+    fn first_test() {
+        let _guard = ValueMock::instance().lock();
+        for _ in 0..10 {
+            assert_eq!(value(), 0);
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn second_test() {
+        let _guard = ValueMock::instance().set(ValueMock(42));
+        for i in 42..52 {
+            assert_eq!(value(), i);
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    let first_test_handle = thread::spawn(first_test);
+    let second_test_handle = thread::spawn(second_test);
+    first_test_handle.join().unwrap();
+    second_test_handle.join().unwrap();
 }

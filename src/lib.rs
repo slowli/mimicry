@@ -213,6 +213,19 @@ pub trait SetMock<'a, T> {
     }
 }
 
+/// Interface to lock mock state changes without [setting](SetMock) the state.
+pub trait LockMock<'a, T>: SetMock<'a, T> {
+    /// Exclusive guard for the mock that does not contain the state.
+    type EmptyGuard: 'a;
+
+    /// Locks access to the mock state without setting the state. This is useful
+    /// for [shared mocks] to ensure that tests not using mocks do not observe mocks
+    /// set by other tests.
+    ///
+    /// [shared mocks]: crate::Shared
+    fn lock(&'a self) -> Self::EmptyGuard;
+}
+
 #[doc(hidden)] // only used in macros
 pub trait CallMock<T> {
     fn call_mock<R>(self, switch: &FallbackSwitch, action: impl FnOnce(Context<'_, T>) -> R) -> R;
@@ -254,6 +267,18 @@ where
     fn set(&'a self, state: T) -> Self::Guard {
         let cell = self.cell.get_or_init(S::default);
         cell.set(state)
+    }
+}
+
+impl<'a, T, S> LockMock<'a, T> for Static<S>
+where
+    S: LockMock<'a, T> + Default,
+{
+    type EmptyGuard = S::EmptyGuard;
+
+    fn lock(&'a self) -> Self::EmptyGuard {
+        let cell = self.cell.get_or_init(S::default);
+        cell.lock()
     }
 }
 

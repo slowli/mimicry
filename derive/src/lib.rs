@@ -41,8 +41,10 @@ pub fn mock_derive(input: TokenStream) -> TokenStream {
     mock_impl::impl_mock(input)
 }
 
-/// Injects mocking logic into a function / method. You may want to use this attribute
-/// conditionally, e.g., behind a `#[cfg_attr(test, _)]` wrapper.
+/// Injects mocking logic into a function / method.
+///
+/// You may want to use this attribute conditionally, e.g.,
+/// behind a `#[cfg_attr(test, _)]` wrapper.
 ///
 /// # Attributes
 ///
@@ -56,7 +58,7 @@ pub fn mock_derive(input: TokenStream) -> TokenStream {
 /// with the same name as the mocked function / method. Alternatively, a path can specify
 /// the function name as well (e.g., `"mocks::State::mock_something"`); this is useful in case
 /// of name collision. The choice of these 2 options is auto-detected based on the last segment
-/// in the path: if it starts with a capital letter, it is considered a mock state type;
+/// in the path: if it starts with an uppercase letter, it is considered a mock state type;
 /// otherwise, it is considered a type + function.
 ///
 /// # Supported items

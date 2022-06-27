@@ -320,18 +320,21 @@ fn recursive_fn() {
 
     assert_eq!(factorial(4, &mut 1), 24);
 
-    let guard = FactorialMock::instance().set_default();
+    let mut guard = FactorialMock::instance().set_default();
     assert_eq!(factorial(4, &mut 1), 1);
     assert_eq!(factorial(5, &mut 1), 120);
     assert_eq!(factorial(10, &mut 1), 435_456_000);
     assert_eq!(factorial(4, &mut 1), 1);
 
-    let mut mock = guard.into_inner();
-    mock.fallback_once = true;
-    let _guard = FactorialMock::instance().set(mock);
+    guard.with(|mock| {
+        mock.fallback_once = true;
+    });
     assert_eq!(factorial(4, &mut 1), 1);
     assert_eq!(factorial(5, &mut 1), 5);
     assert_eq!(factorial(10, &mut 1), 151200);
+
+    drop(guard);
+    assert_eq!(factorial(4, &mut 1), 24);
 }
 
 #[cfg(feature = "shared")]

@@ -37,7 +37,9 @@ pub struct FunctionWrapper {
 }
 
 impl FunctionWrapper {
-    fn new(attrs: FunctionAttrs, mut function: ItemFn) -> darling::Result<Self> {
+    // FIXME: fail on const fns
+    // TODO: support async fns if feasible
+    fn new(attrs: FunctionAttrs, mut function: ItemFn) -> Self {
         let mut state = attrs.using;
         let mock_fn = Self::split_off_function(&mut state).unwrap_or_else(|| {
             let mock_fn_name = format!("mock_{}", function.sig.ident);
@@ -46,14 +48,14 @@ impl FunctionWrapper {
         let receiver = function.sig.inputs.first().and_then(receiver_span);
         let (arg_patterns, args) = Self::take_arg_patterns(receiver.is_some(), &mut function.sig);
 
-        Ok(Self {
+        Self {
             state,
             mock_fn,
             function,
             receiver,
             arg_patterns,
             args,
-        })
+        }
     }
 
     fn split_off_function(path: &mut Path) -> Option<Ident> {
@@ -76,7 +78,7 @@ impl FunctionWrapper {
             .inputs
             .iter_mut()
             .enumerate()
-            .skip(skip_receiver as usize);
+            .skip(usize::from(skip_receiver));
         let iter = iter.map(|(i, arg)| {
             let span = arg.span();
             if let FnArg::Typed(pat_type) = arg {
@@ -131,7 +133,7 @@ impl FunctionWrapper {
 
             if !__FALLBACK.with(mimicry::FallbackSwitch::is_active) {
                 let instance = <#state as mimicry::Mock>::instance();
-                if let Some(mock_ref) = mimicry::HandleMock::get(instance) {
+                if let Some(mock_ref) = mimicry::GetMock::get(instance) {
                     return __FALLBACK.with(|fallback| {
                         mimicry::CallMock::call_mock(
                             mock_ref,
@@ -152,6 +154,7 @@ impl ToTokens for FunctionWrapper {
     }
 }
 
+// FIXME: process impl blocks (probably, in different module)
 pub(crate) fn wrap(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attrs = match FunctionAttrs::parse(attr) {
         Ok(attrs) => attrs,
@@ -159,11 +162,9 @@ pub(crate) fn wrap(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     let tokens = match syn::parse(item) {
         Ok(Item::Fn(function)) => {
-            FunctionWrapper::new(attrs, function).map(|wrapper| quote!(#wrapper))
+            let wrapper = FunctionWrapper::new(attrs, function);
+            Ok(quote!(#wrapper))
         }
-        /*Ok(Item::Impl(impl_block)) => {
-            ImplWrapper::new(attrs, impl_block).map(|wrapper| quote!(#wrapper))
-        }*/
         Ok(item) => {
             let message = "Item is not supported; use `#[mock] on functions";
             Err(darling::Error::custom(message).with_span(&item))
@@ -242,7 +243,7 @@ mod tests {
                 x.to_string()
             }
         };
-        let wrapper = FunctionWrapper::new(attrs, function).unwrap();
+        let wrapper = FunctionWrapper::new(attrs, function);
         let wrapper = wrapper.wrap(quote!());
         let wrapper: ItemFn = syn::parse_quote!(#wrapper);
 
@@ -264,7 +265,7 @@ mod tests {
         let function: ItemFn = syn::parse_quote! {
             fn test(x: u8, y: u8) -> u16 { x + y }
         };
-        let wrapper = FunctionWrapper::new(attrs, function).unwrap();
+        let wrapper = FunctionWrapper::new(attrs, function);
         let fallback_logic = wrapper.fallback_logic();
         let fallback_flag: syn::Block = syn::parse_quote!({ #fallback_logic });
 
@@ -276,7 +277,7 @@ mod tests {
 
             if !__FALLBACK.with(mimicry::FallbackSwitch::is_active) {
                 let instance = <TestMock as mimicry::Mock>::instance();
-                if let Some(mock_ref) = mimicry::HandleMock::get(instance) {
+                if let Some(mock_ref) = mimicry::GetMock::get(instance) {
                     return __FALLBACK.with(|fallback| {
                         mimicry::CallMock::call_mock(
                             mock_ref,

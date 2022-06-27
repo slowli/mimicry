@@ -4,10 +4,68 @@ use parking_lot::{Mutex, MutexGuard, ReentrantMutex, ReentrantMutexGuard};
 
 use core::cell::RefCell;
 
-use crate::{CallMock, Context, FallbackSwitch, HandleMock};
+use crate::{CallMock, Context, FallbackSwitch, GetMock, SetMock};
 
-/// Wrapper around [`Mock`] state that provides cross-thread synchronization.
-// FIXME: large issue is that unrelated threads can get mock values
+/// Wrapper around [`Mock`](crate::Mock) state that provides cross-thread synchronization.
+///
+/// Unlike [`ThreadLocal`](crate::ThreadLocal) wrapper, this one shares the state across
+/// threads, with state synchronization via [`ReentrantMutex`]es (to allow for recursive calls).
+/// Setting the state is synchronized via a [`Mutex`] as well: while one test thread
+/// has a [`SharedGuard`], other tests attempting to set the state will block.
+///
+/// # Pitfalls
+///
+/// Tests that do not set the mock state (i.e., ones that want to deal with real implementations)
+/// can still observe a mock impl "spilled" from another test. This is most probably not what
+/// you want, and there are ways to deal with this issue:
+///
+/// - Run tests one at a time via `cargo test -j 1`.
+/// - FIXME: describe locking w/o setting the state
+///
+/// # Examples
+///
+/// ```
+/// use mimicry::{mock, Context, Mock, SetMock};
+/// # use std::{collections::HashSet, thread};
+///
+/// #[derive(Debug, Default, Mock)]
+/// #[mock(shared)] // necessary to use the shared wrapper.
+/// struct MockState {
+///     counter: u32,
+/// }
+///
+/// impl MockState {
+///     fn mock_answer(mut ctx: Context<'_, Self>) -> u32 {
+///         let counter = ctx.state().counter;
+///         ctx.state().counter += 1;
+///         counter
+///     }
+/// }
+///
+/// // Mocked function.
+/// #[mock(using = "MockState")]
+/// fn answer() -> u32 { 42 }
+///
+/// #[test]
+/// # fn catch() {}
+/// fn some_test() {
+///     // Sets the mock state until `mock_guard` is dropped.
+///     let mock_guard = MockState::instance().set_default();
+///     // Call mocked functions (maybe, indirectly). Calls may originate
+///     // from different threads.
+///     let threads: Vec<_> = (0..5).map(|_| thread::spawn(answer)).collect();
+///     let answers: HashSet<_> = threads
+///         .into_iter()
+///         .map(|handle| handle.join().unwrap())
+///         .collect();
+///     assert_eq!(answers, HashSet::from_iter(0..5));
+///
+///     let state = mock_guard.into_inner();
+///     // Can check the state here...
+///     assert_eq!(state.counter, 5);
+/// }
+/// # some_test();
+/// ```
 #[derive(Debug)]
 pub struct Shared<T> {
     inner: ReentrantMutex<RefCell<Option<T>>>,
@@ -29,9 +87,8 @@ impl<T> Shared<T> {
     }
 }
 
-impl<'a, T: 'static + Send + Sync> HandleMock<'a, T> for Shared<T> {
+impl<'a, T: 'static> GetMock<'a, T> for Shared<T> {
     type Ref = SharedRef<'a, T>;
-    type Guard = SharedGuard<'a, T>;
 
     fn get(&self) -> Option<SharedRef<'_, T>> {
         let guard = self.lock();
@@ -41,6 +98,10 @@ impl<'a, T: 'static + Send + Sync> HandleMock<'a, T> for Shared<T> {
             None
         }
     }
+}
+
+impl<'a, T: 'static> SetMock<'a, T> for Shared<T> {
+    type Guard = SharedGuard<'a, T>;
 
     fn set(&self, state: T) -> SharedGuard<'_, T> {
         let guard = self.write_lock.lock();
@@ -55,12 +116,13 @@ impl<'a, T: 'static + Send + Sync> HandleMock<'a, T> for Shared<T> {
 
 /// Shared reference to mock state.
 #[derive(Debug)]
+#[doc(hidden)] // only (indirectly) used in macros
 pub struct SharedRef<'a, T> {
     // Invariant: the `Option` is always `Some(_)`
     guard: ReentrantMutexGuard<'a, RefCell<Option<T>>>,
 }
 
-impl<T: 'static + Send + Sync> CallMock<T> for SharedRef<'_, T> {
+impl<T: 'static> CallMock<T> for SharedRef<'_, T> {
     fn call_mock<R>(self, switch: &FallbackSwitch, action: impl FnOnce(Context<'_, T>) -> R) -> R {
         let state = &*self.guard;
         action(Context::new(state, switch))
@@ -76,9 +138,9 @@ pub struct SharedGuard<'a, T> {
 
 impl<T> SharedGuard<'_, T> {
     /// Returns the enclosed mock state and lifts the exclusive lock.
+    #[allow(clippy::missing_panics_doc)] // unwrap() is safe by construction
     pub fn into_inner(self) -> T {
         self.mock.lock().take().unwrap()
-        // ^ unwrap() should be safe by construction
     }
 }
 

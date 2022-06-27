@@ -50,9 +50,10 @@ impl Mock {
 
 impl FromDeriveInput for Mock {
     fn from_derive_input(input: &DeriveInput) -> darling::Result<Self> {
-        let attrs = find_meta_attrs("mock", &input.attrs)
-            .map(|meta| MockAttrs::from_nested_meta(&meta))
-            .unwrap_or_else(|| Ok(MockAttrs::default()))?;
+        let attrs = find_meta_attrs("mock", &input.attrs).map_or_else(
+            || Ok(MockAttrs::default()),
+            |meta| MockAttrs::from_nested_meta(&meta),
+        )?;
 
         let mut params = input.generics.params.iter();
         let lifetime_span = params.find_map(|param| {
@@ -78,9 +79,7 @@ impl FromDeriveInput for Mock {
 impl ToTokens for Mock {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let mock_impl = self.impl_mock();
-        tokens.extend(quote! {
-            #mock_impl
-        })
+        tokens.extend(quote!(#mock_impl));
     }
 }
 

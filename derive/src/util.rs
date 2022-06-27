@@ -178,12 +178,11 @@ pub(crate) fn specify_lifetime(sig: &mut Signature) -> darling::Result<()> {
         // where to borrow it from.
 
         // First, check the first argument, which is the only one that can be the receiver.
-        let first_arg = match sig.inputs.first_mut() {
-            Some(arg) => arg,
-            None => {
-                let message = "Nowhere to elide the lifetime from";
-                return Err(darling::Error::custom(message).with_span(sig));
-            }
+        let first_arg = if let Some(arg) = sig.inputs.first_mut() {
+            arg
+        } else {
+            let message = "Nowhere to elide the lifetime from";
+            return Err(darling::Error::custom(message).with_span(sig));
         };
 
         let lifetime = if receiver_span(first_arg).is_some() {

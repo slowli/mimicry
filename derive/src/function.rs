@@ -6,7 +6,7 @@ use proc_macro2::Span;
 use quote::{quote, quote_spanned, ToTokens};
 use syn::{
     parse::Parser, punctuated::Punctuated, spanned::Spanned, token::Comma, FnArg, Ident, Item,
-    ItemFn, NestedMeta, Pat, PatIdent, Path, Signature,
+    ItemFn, ItemImpl, NestedMeta, Pat, PatIdent, Path, Signature,
 };
 
 use std::mem;
@@ -16,6 +16,7 @@ use crate::util::receiver_span;
 #[derive(Debug, FromMeta)]
 struct FunctionAttrs {
     using: Path,
+    rename: Option<String>,
 }
 
 impl FunctionAttrs {
@@ -23,6 +24,12 @@ impl FunctionAttrs {
         let meta = Punctuated::<NestedMeta, Comma>::parse_terminated.parse(attr)?;
         let meta: Vec<_> = meta.into_iter().collect();
         Self::from_list(&meta)
+    }
+
+    fn rename(spec: &str, ident: &Ident) -> Ident {
+        let ident_string = ident.to_string();
+        let ident_string = spec.replace("{}", &ident_string);
+        Ident::new(&ident_string, ident.span())
     }
 }
 
@@ -37,13 +44,23 @@ pub struct FunctionWrapper {
 }
 
 impl FunctionWrapper {
-    // FIXME: fail on const fns
+    fn can_process(signature: &Signature) -> darling::Result<()> {
+        if let Some(const_token) = &signature.constness {
+            let message = "const functions are not supported";
+            return Err(darling::Error::custom(message).with_span(const_token));
+        }
+        Ok(())
+    }
+
     // TODO: support async fns if feasible
     fn new(attrs: FunctionAttrs, mut function: ItemFn) -> Self {
         let mut state = attrs.using;
         let mock_fn = Self::split_off_function(&mut state).unwrap_or_else(|| {
-            let mock_fn_name = format!("mock_{}", function.sig.ident);
-            Ident::new(&mock_fn_name, function.sig.ident.span())
+            if let Some(spec) = &attrs.rename {
+                FunctionAttrs::rename(spec, &function.sig.ident)
+            } else {
+                function.sig.ident.clone()
+            }
         });
         let receiver = function.sig.inputs.first().and_then(receiver_span);
         let (arg_patterns, args) = Self::take_arg_patterns(receiver.is_some(), &mut function.sig);
@@ -154,7 +171,49 @@ impl ToTokens for FunctionWrapper {
     }
 }
 
-// FIXME: process impl blocks (probably, in different module)
+#[derive(Debug)]
+struct ImplWrapper {
+    block: ItemImpl,
+}
+
+impl ImplWrapper {
+    fn new(mut attrs: FunctionAttrs, mut block: ItemImpl) -> darling::Result<Self> {
+        let maybe_fn = FunctionWrapper::split_off_function(&mut attrs.using);
+        if maybe_fn.is_some() {
+            let message = "function specification is not supported for impl blocks; \
+                 use the `rename` attr instead, such as \
+                 `#[mock(using = \"Mock\", rename = \"mock_{}\")]";
+            return Err(darling::Error::custom(message).with_span(&attrs.using));
+        }
+
+        let path = &attrs.using;
+        let path_string = quote!(#path).to_string();
+        let rename = attrs.rename.as_deref();
+        for item in &mut block.items {
+            if let syn::ImplItem::Method(method) = item {
+                if FunctionWrapper::can_process(&method.sig).is_ok() {
+                    Self::add_attr(method, &path_string, rename);
+                }
+            }
+        }
+        Ok(Self { block })
+    }
+
+    fn add_attr(method: &mut syn::ImplItemMethod, path_str: &str, rename: Option<&str>) {
+        let rename = rename.map(|spec| quote!(, rename = #spec));
+        method.attrs.push(syn::parse_quote! {
+            #[mimicry::mock(using = #path_str #rename)]
+        });
+    }
+}
+
+impl ToTokens for ImplWrapper {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        let block = &self.block;
+        tokens.extend(quote!(#block));
+    }
+}
+
 pub(crate) fn wrap(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attrs = match FunctionAttrs::parse(attr) {
         Ok(attrs) => attrs,
@@ -164,6 +223,9 @@ pub(crate) fn wrap(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(Item::Fn(function)) => {
             let wrapper = FunctionWrapper::new(attrs, function);
             Ok(quote!(#wrapper))
+        }
+        Ok(Item::Impl(impl_block)) => {
+            ImplWrapper::new(attrs, impl_block).map(|wrapper| quote!(#wrapper))
         }
         Ok(item) => {
             let message = "Item is not supported; use `#[mock] on functions";
@@ -232,6 +294,7 @@ mod tests {
     fn simple_wrapper() {
         let attrs = FunctionAttrs {
             using: syn::parse_quote!(TestMock),
+            rename: None,
         };
         let function: ItemFn = syn::parse_quote! {
             fn test(
@@ -261,6 +324,7 @@ mod tests {
     fn defining_fallback_flag() {
         let attrs = FunctionAttrs {
             using: syn::parse_quote!(TestMock),
+            rename: None,
         };
         let function: ItemFn = syn::parse_quote! {
             fn test(x: u8, y: u8) -> u16 { x + y }
@@ -282,7 +346,7 @@ mod tests {
                         mimicry::CallMock::call_mock(
                             mock_ref,
                             fallback,
-                            |cx| TestMock::mock_test(cx, __arg0, __arg1,),
+                            |cx| TestMock::test(cx, __arg0, __arg1,),
                         )
                     });
                 }

@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, collections::HashMap, hash::Hash, thread};
+use std::{borrow::Borrow, collections::HashMap, hash::Hash, mem, thread};
 
 #[cfg(feature = "shared")]
 use mimicry::LockMock;
@@ -6,7 +6,7 @@ use mimicry::{mock, Context, Mock, SetMock};
 
 #[test]
 fn mock_basics() {
-    #[mock(using = "SearchMock")]
+    #[mock(using = "SearchMock", rename = "mock_{}")]
     fn search(haystack: &str, needle: char) -> Option<usize> {
         haystack.chars().position(|ch| ch == needle)
     }
@@ -61,11 +61,11 @@ fn mock_with_lifetimes() {
     struct TailMock;
 
     impl TailMock {
-        fn mock_tail<'a>(mut cx: Context<'_, Self>, bytes: &'a mut [u8]) -> Option<&'a u8> {
+        fn tail<'a>(mut ctx: Context<'_, Self>, bytes: &'a mut [u8]) -> Option<&'a u8> {
             if bytes == b"test" {
                 Some(&0)
             } else {
-                cx.fallback(|| tail(bytes))
+                ctx.fallback(|| tail(bytes))
             }
         }
     }
@@ -134,12 +134,12 @@ fn mock_for_generic_function() {
     }
 
     impl GenericMock {
-        fn mock_len(mut cx: Context<'_, Self>, value: impl AsRef<str>) -> usize {
+        fn len(mut cx: Context<'_, Self>, value: impl AsRef<str>) -> usize {
             cx.state().len_args.push(value.as_ref().to_owned());
             cx.fallback(|| len(value))
         }
 
-        fn mock_get_key<K, Q: ?Sized>(
+        fn get_key<K, Q: ?Sized>(
             mut cx: Context<'_, Self>,
             map: &HashMap<K, usize>,
             key: &Q,
@@ -174,28 +174,32 @@ fn mock_in_impl() {
     struct Wrapper<T>(T);
 
     impl<T: AsRef<str>> Wrapper<T> {
-        #[mock(using = "LenMock")]
+        #[mock(using = "MockState")]
         fn len(&self) -> usize {
             self.0.as_ref().len()
         }
     }
 
+    #[mock(using = "MockState")]
     impl Wrapper<String> {
-        #[mock(using = "LenMock")]
         fn push(&mut self, value: impl AsRef<str>) -> &mut Self {
             self.0.push_str(value.as_ref());
             self
+        }
+
+        fn take(&mut self) -> String {
+            mem::take(&mut self.0)
         }
     }
 
     #[derive(Mock)]
     #[cfg_attr(feature = "shared", mock(shared))]
-    struct LenMock {
+    struct MockState {
         min_length: usize,
     }
 
-    impl LenMock {
-        fn mock_len<T: AsRef<str>>(mut cx: Context<'_, Self>, this: &Wrapper<T>) -> usize {
+    impl MockState {
+        fn len<T: AsRef<str>>(mut cx: Context<'_, Self>, this: &Wrapper<T>) -> usize {
             if this.0.as_ref() == "test" {
                 42
             } else {
@@ -203,7 +207,7 @@ fn mock_in_impl() {
             }
         }
 
-        fn mock_push<'a>(
+        fn push<'a>(
             mut cx: Context<'_, Self>,
             this: &'a mut Wrapper<String>,
             s: impl AsRef<str>,
@@ -214,9 +218,13 @@ fn mock_in_impl() {
                 cx.fallback(|| this.push(s))
             }
         }
+
+        fn take(_: Context<'_, Self>, this: &mut Wrapper<String>) -> String {
+            this.0.pop().map_or_else(String::new, String::from)
+        }
     }
 
-    let guard = LenMock::instance().set(LenMock { min_length: 3 });
+    let guard = MockState::instance().set(MockState { min_length: 3 });
     assert_eq!(Wrapper("test!").len(), 5);
     assert_eq!(Wrapper("test").len(), 42);
     assert_eq!(Wrapper(String::from("test")).len(), 42);
@@ -226,9 +234,13 @@ fn mock_in_impl() {
     wrapper.push("??").push("test").push("!").push("...");
     assert_eq!(wrapper.0, "test...");
 
+    let taken = wrapper.take();
+    assert_eq!(taken, ".");
+    assert_eq!(wrapper.0, "test..");
+
     drop(guard);
     wrapper.push(":D");
-    assert_eq!(wrapper.0, "test...:D");
+    assert_eq!(wrapper.0, "test..:D");
 }
 
 #[test]
@@ -238,10 +250,10 @@ fn mock_in_impl_trait() {
         state: u8,
     }
 
+    #[mock(using = "IterMock", rename = "iter_{}")]
     impl Iterator for Flip {
         type Item = u8;
 
-        #[mock(using = "IterMock")]
         fn next(&mut self) -> Option<Self::Item> {
             self.state = 1 - self.state;
             Some(self.state)
@@ -253,7 +265,7 @@ fn mock_in_impl_trait() {
     impl Iterator for Const {
         type Item = u8;
 
-        #[mock(using = "IterMock")]
+        #[mock(using = "IterMock::iter_next")]
         fn next(&mut self) -> Option<Self::Item> {
             Some(self.0)
         }
@@ -266,9 +278,9 @@ fn mock_in_impl_trait() {
     }
 
     impl IterMock {
-        fn mock_next<I>(mut cx: Context<'_, Self>, _: &mut I) -> Option<u8> {
-            let count = cx.state().count;
-            cx.state().count += 1;
+        fn iter_next<I>(mut ctx: Context<'_, Self>, _: &mut I) -> Option<u8> {
+            let count = ctx.state().count;
+            ctx.state().count += 1;
             u8::try_from(count).ok()
         }
     }
@@ -306,7 +318,7 @@ fn recursive_fn() {
     }
 
     impl FactorialMock {
-        fn mock_factorial(mut cx: Context<'_, Self>, n: u64, acc: &mut u64) -> u64 {
+        fn factorial(mut cx: Context<'_, Self>, n: u64, acc: &mut u64) -> u64 {
             if n < 5 {
                 *acc // finish the recursion early
             } else if cx.state().fallback_once {
@@ -351,7 +363,7 @@ fn single_shared_mock_in_multi_thread_env() {
     struct ValueMock(u32);
 
     impl ValueMock {
-        fn mock_value(mut cx: Context<'_, Self>) -> u32 {
+        fn value(mut cx: Context<'_, Self>) -> u32 {
             let value = cx.state().0;
             cx.state().0 += 1;
             value
@@ -385,7 +397,7 @@ fn per_thread_mock_in_multi_thread_env() {
     struct ValueMock(u32);
 
     impl ValueMock {
-        fn mock_value(mut cx: Context<'_, Self>) -> u32 {
+        fn value(mut cx: Context<'_, Self>) -> u32 {
             let value = cx.state().0;
             cx.state().0 += 1;
             value
@@ -424,7 +436,7 @@ fn locking_shared_mocks() {
     struct ValueMock(u32);
 
     impl ValueMock {
-        fn mock_value(mut cx: Context<'_, Self>) -> u32 {
+        fn value(mut cx: Context<'_, Self>) -> u32 {
             let value = cx.state().0;
             cx.state().0 += 1;
             value

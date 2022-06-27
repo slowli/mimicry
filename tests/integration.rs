@@ -187,6 +187,7 @@ fn mock_in_impl() {
             self
         }
 
+        #[mock(using = "MockState::mock_take")]
         fn take(&mut self) -> String {
             mem::take(&mut self.0)
         }
@@ -219,7 +220,7 @@ fn mock_in_impl() {
             }
         }
 
-        fn take(_: Context<'_, Self>, this: &mut Wrapper<String>) -> String {
+        fn mock_take(_: Context<'_, Self>, this: &mut Wrapper<String>) -> String {
             this.0.pop().map_or_else(String::new, String::from)
         }
     }

@@ -50,7 +50,7 @@ impl Mock {
 
 impl FromDeriveInput for Mock {
     fn from_derive_input(input: &DeriveInput) -> darling::Result<Self> {
-        let attrs = find_meta_attrs("mock", &input.attrs).map_or_else(
+        let attrs = find_meta_attrs("mock", None, &input.attrs).map_or_else(
             || Ok(MockAttrs::default()),
             |meta| MockAttrs::from_nested_meta(&meta),
         )?;

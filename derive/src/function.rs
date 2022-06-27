@@ -11,7 +11,7 @@ use syn::{
 
 use std::mem;
 
-use crate::util::receiver_span;
+use crate::util::{find_meta_attrs, receiver_span};
 
 #[derive(Debug, FromMeta)]
 struct FunctionAttrs {
@@ -53,7 +53,9 @@ impl FunctionWrapper {
     }
 
     // TODO: support async fns if feasible
-    fn new(attrs: FunctionAttrs, mut function: ItemFn) -> Self {
+    fn new(attrs: FunctionAttrs, mut function: ItemFn) -> darling::Result<Self> {
+        Self::can_process(&function.sig)?;
+
         let mut state = attrs.using;
         let mock_fn = Self::split_off_function(&mut state).unwrap_or_else(|| {
             if let Some(spec) = &attrs.rename {
@@ -65,14 +67,14 @@ impl FunctionWrapper {
         let receiver = function.sig.inputs.first().and_then(receiver_span);
         let (arg_patterns, args) = Self::take_arg_patterns(receiver.is_some(), &mut function.sig);
 
-        Self {
+        Ok(Self {
             state,
             mock_fn,
             function,
             receiver,
             arg_patterns,
             args,
-        }
+        })
     }
 
     fn split_off_function(path: &mut Path) -> Option<Ident> {
@@ -191,7 +193,9 @@ impl ImplWrapper {
         let rename = attrs.rename.as_deref();
         for item in &mut block.items {
             if let syn::ImplItem::Method(method) = item {
-                if FunctionWrapper::can_process(&method.sig).is_ok() {
+                if FunctionWrapper::can_process(&method.sig).is_ok()
+                    && find_meta_attrs("mock", Some("mimicry"), &method.attrs).is_none()
+                {
                     Self::add_attr(method, &path_string, rename);
                 }
             }
@@ -221,8 +225,7 @@ pub(crate) fn wrap(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
     let tokens = match syn::parse(item) {
         Ok(Item::Fn(function)) => {
-            let wrapper = FunctionWrapper::new(attrs, function);
-            Ok(quote!(#wrapper))
+            FunctionWrapper::new(attrs, function).map(|wrapper| quote!(#wrapper))
         }
         Ok(Item::Impl(impl_block)) => {
             ImplWrapper::new(attrs, impl_block).map(|wrapper| quote!(#wrapper))
@@ -306,7 +309,7 @@ mod tests {
                 x.to_string()
             }
         };
-        let wrapper = FunctionWrapper::new(attrs, function);
+        let wrapper = FunctionWrapper::new(attrs, function).unwrap();
         let wrapper = wrapper.wrap(quote!());
         let wrapper: ItemFn = syn::parse_quote!(#wrapper);
 
@@ -321,6 +324,22 @@ mod tests {
     }
 
     #[test]
+    fn error_on_const_fn() {
+        let attrs = FunctionAttrs {
+            using: syn::parse_quote!(TestMock),
+            rename: None,
+        };
+        let function: ItemFn = syn::parse_quote! {
+            const fn test(x: u8, y: u8) -> u8 { x + y }
+        };
+
+        let err = FunctionWrapper::new(attrs, function)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("const functions"), "{}", err);
+    }
+
+    #[test]
     fn defining_fallback_flag() {
         let attrs = FunctionAttrs {
             using: syn::parse_quote!(TestMock),
@@ -329,7 +348,7 @@ mod tests {
         let function: ItemFn = syn::parse_quote! {
             fn test(x: u8, y: u8) -> u16 { x + y }
         };
-        let wrapper = FunctionWrapper::new(attrs, function);
+        let wrapper = FunctionWrapper::new(attrs, function).unwrap();
         let fallback_logic = wrapper.fallback_logic();
         let fallback_flag: syn::Block = syn::parse_quote!({ #fallback_logic });
 
@@ -353,5 +372,57 @@ mod tests {
             }
         });
         assert_eq!(fallback_flag, expected, "{}", quote!(#fallback_flag));
+    }
+
+    #[test]
+    fn wrapping_impl_block() {
+        let attrs = FunctionAttrs {
+            using: syn::parse_quote!(TestMock),
+            rename: None,
+        };
+        let block: ItemImpl = syn::parse_quote! {
+            impl Test {
+                const CONST: usize = 0;
+
+                fn test(&self) -> usize { Self::CONST }
+
+                #[mock(using = "OtherMock")]
+                fn other() -> String { String::new() }
+            }
+        };
+
+        let wrapper = ImplWrapper::new(attrs, block).unwrap();
+        let expected: ItemImpl = syn::parse_quote! {
+            impl Test {
+                const CONST: usize = 0;
+
+                #[mimicry::mock(using = "TestMock")]
+                fn test(&self) -> usize { Self::CONST }
+
+                #[mock(using = "OtherMock")]
+                fn other() -> String { String::new() }
+            }
+        };
+        assert_eq!(wrapper.block, expected, "{}", quote!(#wrapper));
+    }
+
+    #[test]
+    fn wrapping_impl_block_errors() {
+        let attrs = FunctionAttrs {
+            using: syn::parse_quote!(TestMock::test),
+            rename: None,
+        };
+        let block: ItemImpl = syn::parse_quote! {
+            impl Test {
+                fn test(&self) -> usize { Self::CONST }
+            }
+        };
+
+        let err = ImplWrapper::new(attrs, block).unwrap_err().to_string();
+        assert!(
+            err.contains("function specification is not supported"),
+            "{}",
+            err
+        );
     }
 }

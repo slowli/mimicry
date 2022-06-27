@@ -11,6 +11,7 @@ thread_local = "1.1.4"
 mimicry-derive = { version = "0.1.0", path = "derive" }
 
 [dev-dependencies]
+doc-comment = "0.3.3"
 static_assertions = "1.1.0"
 
 [features]

@@ -36,7 +36,10 @@
 //! - No matching via predicates etc. With the chosen approach, it is easier and more transparent
 //!   to just use `match` statements. As a downside, if matching logic needs to be customized
 //!   across tests, it's up to the test writer.
-//! - Cannot mock types from other crates.
+//!
+//! ## Downsides
+//!
+//! - You still cannot mock types from other crates.
 //! - Even if mocking logic does not use certain args, they need to be properly constructed,
 //!   which, depending on the case, may defy the reasons behind using mocks.
 //!
@@ -438,3 +441,6 @@ impl Drop for FallbackGuard<'_> {
         self.switch.0.set(FallbackState::Inactive);
     }
 }
+
+#[cfg(doctest)]
+doc_comment::doctest!("../README.md");

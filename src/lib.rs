@@ -56,20 +56,24 @@
 //! ## Basics
 //!
 //! ```
-//! use mimicry::{mock, Context, Mock, SetMock};
+//! use mimicry::{mock, CallReal, RealCallSwitch, Mock};
+//! # use std::cell::Cell;
 //!
 //! // Mock target: a standalone function.
-//! #[mock(using = "SearchMock")]
-//! // ^ In real uses, this attr would be wrapped in a condition
-//! // such as `#[cfg_attr(test, _)]`.
+//! #[cfg_attr(test, mock(using = "SearchMock"))]
+//! # fn eat_attr() {}
+//! # #[mock(using = "SearchMock")]
 //! fn search(haystack: &str, needle: char) -> Option<usize> {
 //!     haystack.chars().position(|ch| ch == needle)
 //! }
 //!
 //! // Mock state. In this case, we use it to record responses.
-//! #[derive(Default, Mock)]
+//! #[derive(Default, Mock, CallReal)]
 //! struct SearchMock {
-//!     called_times: usize,
+//!     called_times: Cell<usize>,
+//!     switch: RealCallSwitch,
+//!     // ^ Stores the real / mocked function switch, thus allowing
+//!     // to call `Delegate` trait methods.
 //! }
 //!
 //! impl SearchMock {
@@ -79,31 +83,36 @@
 //!     // with the additional context parameter that allows
 //!     // accessing the mock state and controlling mock / real function switches.
 //!     fn search(
-//!         mut ctx: Context<'_, Self>,
+//!         &self,
 //!         haystack: &str,
 //!         needle: char,
 //!     ) -> Option<usize> {
-//!         ctx.state().called_times += 1;
+//!         self.called_times.set(self.called_times.get() + 1);
 //!         match haystack {
 //!             "test" => Some(42),
 //!             short if short.len() <= 2 => None,
 //!             _ => {
 //!                 let new_needle = if needle == '?' { 'e' } else { needle };
-//!                 ctx.fallback(|| search(haystack, new_needle))
+//!                 self.call_real(|| search(haystack, new_needle))
 //!             }
 //!         }
 //!     }
 //! }
 //!
 //! // Test code.
-//! let guard = SearchMock::instance().set_default();
+//! let guard = SearchMock::set_default();
 //! assert_eq!(search("test", '?'), Some(42));
 //! assert_eq!(search("?!", '?'), None);
 //! assert_eq!(search("needle?", '?'), Some(1));
 //! assert_eq!(search("needle?", 'd'), Some(3));
 //! let recovered = guard.into_inner();
-//! assert_eq!(recovered.called_times, 4);
+//! assert_eq!(recovered.called_times.into_inner(), 4);
 //! ```
+//!
+//! Mock functions only get a shared reference to the mock state; this is because
+//! the same state can be accessed from multiple places during recursive calls.
+//! To easily mutate the state during tests, consider using the [`Mut`](crate::Mut)
+//! wrapper.
 //!
 //! ## On impl blocks
 //!
@@ -111,7 +120,7 @@
 //! to apply a mock to all methods in the block:
 //!
 //! ```
-//! # use mimicry::{mock, Context, Mock};
+//! # use mimicry::{mock, CheckRealCall, Mock};
 //! struct Tested(String);
 //!
 //! #[mock(using = "TestMock")]
@@ -133,14 +142,18 @@
 //!
 //! #[derive(Mock)]
 //! struct TestMock { /* ... */ }
+//! // Since we don't use partial mocking / spying, we indicate
+//! // this with an empty `CheckRealCall` impl.
+//! impl CheckRealCall for TestMock {}
+//!
 //! impl TestMock {
-//!     fn len(ctx: Context<'_, Self>, recv: &Tested) -> usize {
+//!     fn len(&self, recv: &Tested) -> usize {
 //!         // ...
 //!         # 0
 //!     }
 //!
 //!     fn push<'s>(
-//!         ctx: Context<'_, Self>,
+//!         &self,
 //!         recv: &'s mut Tested,
 //!         s: impl AsRef<str>,
 //!     ) -> &'s mut Tested {
@@ -148,7 +161,7 @@
 //!         # recv
 //!     }
 //!
-//!     fn impl_as_ref<'s>(ctx: Context<'_, Self>, recv: &'s Tested) -> &'s str {
+//!     fn impl_as_ref<'s>(&self, recv: &'s Tested) -> &'s str {
 //!         // ...
 //!         # ""
 //!     }
@@ -158,7 +171,8 @@
 //! ## What can('t) be mocked?
 //!
 //! ```
-//! # use mimicry::{mock, Context, Mock, SetMock};
+//! # use mimicry::{mock, CheckRealCall, Mock};
+//! # use std::sync::atomic::{AtomicU32, Ordering};
 //! struct Test;
 //! impl Test {
 //!     #[mock(using = "CountingMock::count")]
@@ -190,24 +204,27 @@
 //! }
 //!
 //! #[derive(Default, Mock)]
-//! struct CountingMock(usize);
+//! struct CountingMock(AtomicU32);
+//!
+//! impl CheckRealCall for CountingMock {}
+//!
 //! impl CountingMock {
 //!     // All functions above can be mocked with a single impl!
 //!     // This is quite extreme, obviously; in realistic scenarios,
 //!     // you probably wouldn't be able to unite mocks of functions
 //!     // with significantly differing return types.
-//!     fn count<T, R: Default>(mut ctx: Context<'_, Self>, _: T) -> R {
-//!         ctx.state().0 += 1;
+//!     fn count<T, R: Default>(&self, _: T) -> R {
+//!         self.0.fetch_add(1, Ordering::Relaxed);
 //!         R::default()
 //!     }
 //! }
 //!
-//! let guard = CountingMock::instance().set_default();
+//! let guard = CountingMock::set_default();
 //! Test.do_something();
 //! assert_eq!(Test.lifetimes(), "");
 //! assert_eq!(Test.next(), None);
 //! let count = guard.into_inner().0;
-//! assert_eq!(count, 3);
+//! assert_eq!(count.into_inner(), 3);
 //! ```
 
 // Documentation settings.
@@ -231,9 +248,9 @@ mod traits;
 pub use crate::shared::Shared;
 pub use crate::{
     tls::ThreadLocal,
-    traits::{CheckDelegate, Delegate, DelegateSwitch, GetMock},
+    traits::{CallReal, CheckRealCall, GetMock, RealCallSwitch},
 };
-pub use mimicry_derive::{mock, Mock};
+pub use mimicry_derive::{mock, CallReal, Mock};
 
 use crate::traits::{Guard, LockMock, SetMock, Wrap};
 
@@ -267,7 +284,7 @@ where
 /// State of a mock.
 pub trait Mock: Sized {
     #[doc(hidden)]
-    type Base: Wrap<Self> + CheckDelegate;
+    type Base: Wrap<Self> + CheckRealCall;
 
     /// Wrapper around [`Self::Base`] allowing to share it across test code and the main program.
     #[doc(hidden)]
@@ -372,13 +389,16 @@ where
 /// A lightweight wrapper around the state (essentially, a [`RefCell`]) allowing to easily
 /// mutate it in mock code.
 ///
+/// Besides access to the state, `Mut` implements [`Delegate`], thus allowing
+/// partial mocks / spies.
+///
 /// # Examples
 ///
 /// FIXME
 #[derive(Debug, Default)]
 pub struct Mut<T> {
     inner: RefCell<T>,
-    switch: DelegateSwitch,
+    switch: RealCallSwitch,
 }
 
 impl<T> Mut<T> {
@@ -402,7 +422,7 @@ impl<T> From<T> for Mut<T> {
     fn from(inner: T) -> Self {
         Self {
             inner: RefCell::new(inner),
-            switch: DelegateSwitch::default(),
+            switch: RealCallSwitch::default(),
         }
     }
 }
@@ -417,8 +437,8 @@ impl<T> Wrap<T> for Mut<T> {
     }
 }
 
-impl<T> Delegate for Mut<T> {
-    fn delegate_switch(&self) -> &DelegateSwitch {
+impl<T> CallReal for Mut<T> {
+    fn real_switch(&self) -> &RealCallSwitch {
         &self.switch
     }
 }

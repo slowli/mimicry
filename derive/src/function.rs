@@ -149,7 +149,7 @@ impl FunctionWrapper {
             {
                 let instance = <#state as mimicry::Mock>::instance();
                 if let Some(mock_ref) = mimicry::GetMock::get(instance) {
-                    if !mimicry::CheckDelegate::should_delegate(&*mock_ref) {
+                    if !mimicry::CheckRealCall::should_call_real(&*mock_ref) {
                         return #state::#mock_fn(&*mock_ref, #recv #(#args,)*);
                     }
                 }

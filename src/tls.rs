@@ -18,17 +18,18 @@ use crate::{GetMock, Guard, SetMock};
 /// # Examples
 ///
 /// ```
-/// use mimicry::{Mock, SetMock};
+/// use mimicry::Mock;
 ///
-/// #[derive(Debug, Default, Mock)]
+/// #[derive(Default, Mock)]
 /// struct MockState {
 ///     // fields to support mock logic
 /// }
+/// # impl mimicry::CheckRealCall for MockState {}
 ///
 /// #[test]
 /// fn some_test() {
 ///     // Sets the mock state until `mock_guard` is dropped.
-///     let mock_guard = MockState::instance().set_default();
+///     let mock_guard = MockState::set_default();
 ///     // Call mocked functions (maybe, indirectly). All calls
 ///     // need to happen from the original test thread.
 ///     let state = mock_guard.into_inner();

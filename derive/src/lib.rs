@@ -14,6 +14,7 @@
 
 extern crate proc_macro;
 
+mod call_real_impl;
 mod function;
 mod mock_impl;
 mod utils;
@@ -41,6 +42,13 @@ use proc_macro::TokenStream;
 #[proc_macro_derive(Mock, attributes(mock))]
 pub fn mock_derive(input: TokenStream) -> TokenStream {
     mock_impl::impl_mock(input)
+}
+
+/// Derives the `CallReal` trait for a type allowing to switch to real implementations
+/// for partial mocking or spying.
+#[proc_macro_derive(CallReal, attributes(mock))]
+pub fn call_real_derive(input: TokenStream) -> TokenStream {
+    call_real_impl::impl_call_real(input)
 }
 
 /// Injects mocking logic into a function / method.

@@ -4,7 +4,7 @@
 use core::{cell::Cell, ops};
 
 /// Interface to get mock state.
-#[doc(hidden)]
+#[doc(hidden)] // only used by generated code
 pub trait GetMock<'a, T> {
     /// Reference to the shared mock state. This is required as a separate entity to only
     /// call the mock impls when appropriate (non-`Copy` / non-autoref'd args
@@ -17,7 +17,6 @@ pub trait GetMock<'a, T> {
 }
 
 /// Interface to set up mock state.
-#[doc(hidden)]
 pub trait SetMock<'a, T> {
     type Guard: 'a + Guard<T>;
 
@@ -25,7 +24,6 @@ pub trait SetMock<'a, T> {
 }
 
 /// Guard for setting mock state from the test code.
-#[doc(hidden)]
 pub trait Guard<T> {
     fn with<R>(&mut self, action: impl FnOnce(&mut T) -> R) -> R;
 
@@ -50,7 +48,6 @@ pub trait LockMock<'a, T>: SetMock<'a, T> {
 /// is similar to `Into<T> + BorrowMut<T>`, but without the necessity to implement `Borrow<T>`
 /// (which would be unsound for the desired use cases), or deal with impossibility to
 /// blanket-implement `Into<T>`.
-#[doc(hidden)]
 pub trait Wrap<T>: From<T> {
     /// Returns the wrapped value.
     fn into_inner(self) -> T;
@@ -69,54 +66,54 @@ impl<T> Wrap<T> for T {
 }
 
 /// Checks whether it is necessary to delegate to real impl instead of the mock.
-#[doc(hidden)]
-pub trait CheckDelegate {
+pub trait CheckRealCall {
     /// Performs the check.
     ///
     /// The default implementation always returns `false` (i.e., always use the mock).
-    fn should_delegate(&self) -> bool {
+    fn should_call_real(&self) -> bool {
         false
     }
 }
 
-/// Controls delegation to real impls.
-pub trait Delegate {
-    /// Returns a reference to the delegate switch.
-    fn delegate_switch(&self) -> &DelegateSwitch;
+/// Controls delegation to real impls. The methods in this trait can be used
+/// for partial mocking and spying.
+pub trait CallReal {
+    /// Returns a reference to the call switch.
+    fn real_switch(&self) -> &RealCallSwitch;
 
     /// Runs the provided closure with all calls to the mocked function / method being
     /// directed to "real" implementation.
     fn call_real<R>(&self, action: impl FnOnce() -> R) -> R {
-        let switch = <Self as Delegate>::delegate_switch(self);
-        switch.0.set(DelegateMode::RealImpl);
-        let _guard = DelegateGuard { switch };
+        let switch = <Self as CallReal>::real_switch(self);
+        switch.0.set(RealCallMode::Always);
+        let _guard = RealCallGuard { switch };
         action()
     }
 
     /// Runs the provided closure with the *first* call to the mocked function / method being
     /// directed to "real" implementation. Further calls will be directed to the mock.
     fn call_real_once<R>(&self, action: impl FnOnce() -> R) -> R {
-        let switch = <Self as Delegate>::delegate_switch(self);
-        switch.0.set(DelegateMode::RealImplOnce);
-        let _guard = DelegateGuard { switch };
+        let switch = <Self as CallReal>::real_switch(self);
+        switch.0.set(RealCallMode::Once);
+        let _guard = RealCallGuard { switch };
         action()
     }
 }
 
-impl<T: Delegate> CheckDelegate for T {
-    fn should_delegate(&self) -> bool {
-        self.delegate_switch().should_delegate()
+impl<T: CallReal> CheckRealCall for T {
+    fn should_call_real(&self) -> bool {
+        self.real_switch().should_delegate()
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum DelegateMode {
+enum RealCallMode {
     Inactive,
-    RealImpl,
-    RealImplOnce,
+    Always,
+    Once,
 }
 
-impl Default for DelegateMode {
+impl Default for RealCallMode {
     fn default() -> Self {
         Self::Inactive
     }
@@ -124,29 +121,61 @@ impl Default for DelegateMode {
 
 /// Switch between real and mocked implementations.
 ///
+/// A field of this type should be present on a struct for `#[derive(CallReal)]` to work.
+///
 /// # Examples
 ///
-/// FIXME
+/// ```
+/// # use mimicry::{CallReal, Mock, RealCallSwitch};
+/// #[derive(Mock, CallReal)]
+/// struct MockState {
+///     // other fields...
+///     _switch: RealCallSwitch,
+/// }
+///
+/// // You can now use `CallReal` methods in mock logic:
+/// impl MockState {
+///     fn mock_something(&self, arg: &str) {
+///         self.call_real(|| { /* ... */ });
+///     }
+/// }
+/// ```
+///
+/// The derive logic is nothing magical; it can be easily replicated manually if necessary:
+///
+/// ```
+/// # use mimicry::{CallReal, RealCallSwitch};
+/// struct MockState {
+///     // other fields...
+///     switch: RealCallSwitch,
+/// }
+///
+/// impl CallReal for MockState {
+///     fn real_switch(&self) -> &RealCallSwitch {
+///         &self.switch
+///     }
+/// }
+/// ```
 #[derive(Debug, Default)]
-pub struct DelegateSwitch(Cell<DelegateMode>);
+pub struct RealCallSwitch(Cell<RealCallMode>);
 
-impl DelegateSwitch {
+impl RealCallSwitch {
     fn should_delegate(&self) -> bool {
         let mode = self.0.get();
-        if mode == DelegateMode::RealImplOnce {
-            self.0.set(DelegateMode::Inactive);
+        if mode == RealCallMode::Once {
+            self.0.set(RealCallMode::Inactive);
         }
-        mode != DelegateMode::Inactive
+        mode != RealCallMode::Inactive
     }
 }
 
 #[derive(Debug)]
-struct DelegateGuard<'a> {
-    switch: &'a DelegateSwitch,
+struct RealCallGuard<'a> {
+    switch: &'a RealCallSwitch,
 }
 
-impl Drop for DelegateGuard<'_> {
+impl Drop for RealCallGuard<'_> {
     fn drop(&mut self) {
-        self.switch.0.set(DelegateMode::Inactive);
+        self.switch.0.set(RealCallMode::Inactive);
     }
 }

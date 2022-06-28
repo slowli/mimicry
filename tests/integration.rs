@@ -7,7 +7,7 @@ use std::{
     thread,
 };
 
-use mimicry::{mock, Delegate, DelegateSwitch, Mock, Mut};
+use mimicry::{mock, CallReal, Mock, Mut, RealCallSwitch};
 
 #[test]
 fn mock_basics() {
@@ -62,10 +62,10 @@ fn mock_with_lifetimes() {
         }
     }
 
-    #[derive(Default, Mock)]
+    #[derive(Default, Mock, CallReal)]
     #[cfg_attr(feature = "shared", mock(shared))]
     struct TailMock {
-        switch: DelegateSwitch,
+        switch: RealCallSwitch,
     }
 
     impl TailMock {
@@ -95,9 +95,9 @@ fn mock_consuming_args() {
         String::from_utf8(bytes).ok()
     }
 
-    #[derive(Default, Mock)]
+    #[derive(Default, Mock, CallReal)]
     #[cfg_attr(feature = "shared", mock(shared))]
-    struct ConsumeMock(DelegateSwitch);
+    struct ConsumeMock(RealCallSwitch);
 
     impl ConsumeMock {
         fn consume(&self, bytes: Vec<u8>) -> Option<String> {
@@ -198,11 +198,11 @@ fn mock_in_impl() {
         }
     }
 
-    #[derive(Mock)]
+    #[derive(Mock, CallReal)]
     #[cfg_attr(feature = "shared", mock(shared))]
     struct MockState {
         min_length: usize,
-        switch: DelegateSwitch,
+        switch: RealCallSwitch,
     }
 
     impl MockState {
@@ -233,7 +233,7 @@ fn mock_in_impl() {
 
     let guard = MockState::set(MockState {
         min_length: 3,
-        switch: DelegateSwitch::default(),
+        switch: RealCallSwitch::default(),
     });
     assert_eq!(Wrapper("test!").len(), 5);
     assert_eq!(Wrapper("test").len(), 42);
@@ -294,6 +294,8 @@ fn mock_in_impl_trait() {
         }
     }
 
+    impl mimicry::CheckRealCall for IterMock {}
+
     let mut flip = Flip::default();
     assert_eq!(flip.by_ref().take(5).collect::<Vec<_>>(), [1, 0, 1, 0, 1]);
 
@@ -320,11 +322,11 @@ fn recursive_fn() {
         }
     }
 
-    #[derive(Default, Mock)]
+    #[derive(Default, Mock, CallReal)]
     #[cfg_attr(feature = "shared", mock(shared))]
     struct FactorialMock {
         fallback_once: AtomicBool,
-        switch: DelegateSwitch,
+        switch: RealCallSwitch,
     }
 
     impl FactorialMock {
@@ -359,25 +361,27 @@ fn recursive_fn() {
     assert_eq!(factorial(4, &mut 1), 24);
 }
 
+#[derive(Default, Mock)]
+#[cfg_attr(feature = "shared", mock(shared))]
+struct ValueMock(AtomicU32);
+
+impl ValueMock {
+    fn value(&self) -> u32 {
+        self.0.fetch_add(1, Ordering::SeqCst)
+    }
+}
+
+impl mimicry::CheckRealCall for ValueMock {}
+
+#[mock(using = "ValueMock")]
+fn value() -> u32 {
+    0
+}
+
 #[cfg(feature = "shared")]
 #[test]
 #[allow(clippy::needless_collect)] // needed for threads to be spawned concurrently
 fn single_shared_mock_in_multi_thread_env() {
-    #[mock(using = "ValueMock")]
-    fn value() -> u32 {
-        0
-    }
-
-    #[derive(Default, Mock)]
-    #[mock(shared)]
-    struct ValueMock(AtomicU32);
-
-    impl ValueMock {
-        fn value(&self) -> u32 {
-            self.0.fetch_add(1, Ordering::SeqCst)
-        }
-    }
-
     let guard = ValueMock::set_default();
     let thread_handles: Vec<_> = (0..5)
         .map(|_| thread::spawn(|| (0..10).map(|_| value()).sum::<u32>()))
@@ -395,21 +399,6 @@ fn single_shared_mock_in_multi_thread_env() {
 #[test]
 #[allow(clippy::needless_collect)] // needed for threads to be spawned concurrently
 fn per_thread_mock_in_multi_thread_env() {
-    #[mock(using = "ValueMock")]
-    fn value() -> u32 {
-        0
-    }
-
-    #[derive(Default, Mock)]
-    #[cfg_attr(feature = "shared", mock(shared))]
-    struct ValueMock(AtomicU32);
-
-    impl ValueMock {
-        fn value(&self) -> u32 {
-            self.0.fetch_add(1, Ordering::SeqCst)
-        }
-    }
-
     let thread_handles: Vec<_> = (0..5)
         .map(|_| {
             thread::spawn(|| {
@@ -431,21 +420,6 @@ fn per_thread_mock_in_multi_thread_env() {
 #[test]
 fn locking_shared_mocks() {
     use std::time::Duration;
-
-    #[mock(using = "ValueMock")]
-    fn value() -> u32 {
-        0
-    }
-
-    #[derive(Mock)]
-    #[mock(shared)]
-    struct ValueMock(AtomicU32);
-
-    impl ValueMock {
-        fn value(&self) -> u32 {
-            self.0.fetch_add(1, Ordering::SeqCst)
-        }
-    }
 
     fn first_test() {
         let _guard = ValueMock::lock();

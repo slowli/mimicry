@@ -32,21 +32,20 @@ use crate::{GetMock, Guard, LockMock, SetMock};
 /// # Examples
 ///
 /// ```
-/// use mimicry::{mock, Context, Mock, SetMock};
-/// # use std::{collections::HashSet, thread};
+/// use mimicry::{mock, CheckRealCall, Mock};
+/// # use std::{collections::HashSet, sync::atomic::{AtomicU32, Ordering}, thread};
 ///
 /// #[derive(Debug, Default, Mock)]
 /// #[mock(shared)]
 /// // ^ use the `Shared` wrapper instead of the default thread-local one
 /// struct MockState {
-///     counter: u32,
+///     counter: AtomicU32,
 /// }
 ///
+/// # impl CheckRealCall for MockState {}
 /// impl MockState {
-///     fn answer(mut ctx: Context<'_, Self>) -> u32 {
-///         let counter = ctx.state().counter;
-///         ctx.state().counter += 1;
-///         counter
+///     fn answer(&self) -> u32 {
+///         self.counter.fetch_add(1, Ordering::Relaxed)
 ///     }
 /// }
 ///
@@ -58,7 +57,7 @@ use crate::{GetMock, Guard, LockMock, SetMock};
 /// # fn catch() {}
 /// fn some_test() {
 ///     // Sets the mock state until `mock_guard` is dropped.
-///     let mock_guard = MockState::instance().set_default();
+///     let mock_guard = MockState::set_default();
 ///     // Call mocked functions (maybe, indirectly). Calls may originate
 ///     // from different threads.
 ///     let threads: Vec<_> = (0..5).map(|_| thread::spawn(answer)).collect();
@@ -70,7 +69,7 @@ use crate::{GetMock, Guard, LockMock, SetMock};
 ///
 ///     let state = mock_guard.into_inner();
 ///     // Can check the state here...
-///     assert_eq!(state.counter, 5);
+///     assert_eq!(state.counter.into_inner(), 5);
 /// }
 /// # some_test();
 /// ```

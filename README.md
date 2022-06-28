@@ -27,7 +27,7 @@ mimicry = "0.1.0"
 Example of usage:
 
 ```rust
-use mimicry::{mock, Context, Mock, SetMock};
+use mimicry::{mock, CallReal, Mock, Mut};
 
 // Tested function
 #[mock(using = "SearchMock")]
@@ -37,6 +37,9 @@ fn search(haystack: &str, needle: char) -> Option<usize> {
 
 // Mock logic
 #[derive(Default, Mock)]
+#[mock(mut)]
+// ^ Indicates that the mock state is wrapped in a wrapper with 
+// internal mutability.
 struct SearchMock {
     called_times: usize,
 }
@@ -45,22 +48,22 @@ impl SearchMock {
     // Implementation of mocked function, which the mocked function
     // will delegate to if the mock is set.
     fn search(
-        mut ctx: Context<'_, Self>,
+        this: &Mut<Self>,
         haystack: &str,
         needle: char,
     ) -> Option<usize> {
-        ctx.state().called_times += 1;
+        this.borrow().called_times += 1;
         if haystack == "test" {
             Some(42)
         } else {
             let new_needle = if needle == '?' { 'e' } else { needle };
-            ctx.fallback(|| search(haystack, new_needle))
+            this.call_real(|| search(haystack, new_needle))
         }
     }
 }
 
 // Test code.
-let guard = SearchMock::instance().set_default();
+let guard = SearchMock::set_default();
 assert_eq!(search("test", '?'), Some(42));
 assert_eq!(search("needle?", '?'), Some(1));
 assert_eq!(search("needle?", 'd'), Some(3));

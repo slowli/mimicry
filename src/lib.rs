@@ -345,7 +345,29 @@ pub trait Mock: Sized {
 ///
 /// # Examples
 ///
-/// FIXME
+/// ```
+/// # use mimicry::{mock, CheckRealCall, Mock, MockGuard};
+/// #[mock(using = "ValueMock")]
+/// fn answer() -> usize { 42 }
+///
+/// #[derive(Default, Mock)]
+/// struct ValueMock(usize);
+///
+/// impl CheckRealCall for ValueMock {}
+///
+/// impl ValueMock {
+///     fn answer(&self) -> usize {
+///         self.0
+///     }
+/// }
+///
+/// assert_eq!(answer(), 42);
+/// let mut guard: MockGuard<ValueMock> = ValueMock::set_default();
+/// assert_eq!(answer(), 0);
+/// guard.with(|mock| { mock.0 = 23; });
+/// // ^ updates mock state without releasing the guard
+/// assert_eq!(answer(), 23);
+/// ```
 pub struct MockGuard<T: Mock> {
     inner: <T::Shared as SetMock<'static, T::Base>>::Guard,
 }
@@ -389,12 +411,34 @@ where
 /// A lightweight wrapper around the state (essentially, a [`RefCell`]) allowing to easily
 /// mutate it in mock code.
 ///
-/// Besides access to the state, `Mut` implements [`Delegate`], thus allowing
+/// Besides access to the state, `Mut` implements [`CallReal`], thus allowing
 /// partial mocks / spies.
 ///
 /// # Examples
 ///
-/// FIXME
+/// ```
+/// # use mimicry::{mock, Mock, MockGuard, Mut};
+/// #[mock(using = "CounterMock")]
+/// fn answer() -> usize { 42 }
+///
+/// #[derive(Default, Mock)]
+/// #[mock(mut)] // indicates to use `Mut`
+/// struct CounterMock(usize);
+///
+/// impl CounterMock {
+///     fn answer(this: &Mut<Self>) -> usize {
+///         // Note a custom "receiver" instead of `&self`
+///         this.borrow().0 += 1;
+///         this.borrow().0
+///     }
+/// }
+///
+/// let mut guard = CounterMock::set_default();
+/// assert_eq!(answer(), 1);
+/// assert_eq!(answer(), 2);
+/// assert_eq!(answer(), 3);
+/// assert_eq!(guard.into_inner().0, 3);
+/// ```
 #[derive(Debug, Default)]
 pub struct Mut<T> {
     inner: RefCell<T>,

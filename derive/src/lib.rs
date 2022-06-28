@@ -33,6 +33,11 @@ use proc_macro::TokenStream;
 /// the [`ThreadLocal`] wrapper is used. Can be specified as `#[mock(shared)]` or
 /// `#[mock(shared = true)]`.
 ///
+/// ## `mut`
+///
+/// Signals to use the [`Mut`] wrapper for the mock state. With this flag set, mock methods
+/// will receive `&Mut<Self>` as the first arg instead of `&self`.
+///
 /// # Examples
 ///
 /// See [`ThreadLocal`] and [`Shared`] docs for examples of usage.
@@ -44,8 +49,20 @@ pub fn mock_derive(input: TokenStream) -> TokenStream {
     mock_impl::impl_mock(input)
 }
 
-/// Derives the `CallReal` trait for a type allowing to switch to real implementations
+/// Derives the `CallReal` trait for a struct allowing to switch to real implementations
 /// for partial mocking or spying.
+///
+/// # Field attributes
+///
+/// Field attributes are placed in a `#[mock(...)]` attribute on a struct / enum.
+///
+/// ## `switch`
+///
+/// Indicates that a field is a [`RealCallSwitch`]. This is usually detected automatically
+/// by the field type, so an explicit declaration is reserved for extraordinary cases.
+/// Specified as `#[mock(switch)]`.
+///
+/// [`RealCallSwitch`]: https://docs.rs/mimicry/latest/mimicry/struct.RealCallSwitch.html
 #[proc_macro_derive(CallReal, attributes(mock))]
 pub fn call_real_derive(input: TokenStream) -> TokenStream {
     call_real_impl::impl_call_real(input)

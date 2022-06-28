@@ -220,75 +220,24 @@
 
 use once_cell::sync::OnceCell;
 
-use core::{
-    cell::{Cell, RefCell},
-    fmt, ops,
-};
+use core::{cell::RefCell, fmt, ops};
 
 #[cfg(feature = "shared")]
 mod shared;
 mod tls;
+mod traits;
 
 #[cfg(feature = "shared")]
-pub use crate::shared::{Shared, SharedGuard};
-pub use crate::tls::{ThreadLocal, ThreadLocalGuard};
+pub use crate::shared::Shared;
+pub use crate::{
+    tls::ThreadLocal,
+    traits::{CheckDelegate, Delegate, DelegateSwitch, GetMock},
+};
 pub use mimicry_derive::{mock, Mock};
 
-/// Interface to get mock state.
-#[doc(hidden)] // only used in macros
-pub trait GetMock<'a, T> {
-    /// Reference to the shared mock state. This is required as a separate entity to only
-    /// call the mock impls when appropriate (non-`Copy` / non-autoref'd args
-    /// are consumed by the call, so we must be extra careful to only call the mock impl
-    /// when we know it's there).
-    type Ref: ops::Deref<Target = T> + 'a;
+use crate::traits::{Guard, LockMock, SetMock, Wrap};
 
-    /// Returns a reference to the shared mock state, or `None` if the mock is not set.
-    fn get(&'a self) -> Option<Self::Ref>;
-}
-
-/// Interface to set up mock state.
-pub trait SetMock<'a, T> {
-    /// Exclusive guard for the mock. See [`Self::set()`] for more details.
-    type Guard: 'a + Guard<T>;
-
-    /// Sets the mock state.
-    ///
-    /// # Return value
-    ///
-    /// Returns an exclusive guard to the shared state. Can be used to check / adjust
-    /// the mock state during the test. Dropping the guard also unsets the mock state,
-    /// so that targeted functions are no longer mocked.
-    ///
-    /// In case of [shared mocks], guards also provided synchronization across concurrently
-    /// executing tests: until a guard is dropped, other threads attempting
-    /// to call [`Self::set()`] will block. Unfortunately, this is not always sufficient
-    /// to have good results; see [`Shared`](crate::Shared) docs for discussion.
-    ///
-    /// [shared mocks]: crate::Shared
-    fn set(&'a self, state: T) -> Self::Guard;
-}
-
-#[doc(hidden)]
-pub trait Guard<T> {
-    fn with<R>(&mut self, action: impl FnOnce(&mut T) -> R) -> R;
-    fn into_inner(self) -> T;
-}
-
-/// Interface to lock mock state changes without [setting](SetMock) the state.
-pub trait LockMock<'a, T>: SetMock<'a, T> {
-    /// Exclusive guard for the mock that does not contain the state.
-    type EmptyGuard: 'a;
-
-    /// Locks access to the mock state without setting the state. This is useful
-    /// for [shared mocks] to ensure that tests not using mocks do not observe mocks
-    /// set by other tests.
-    ///
-    /// [shared mocks]: crate::Shared
-    fn lock(&'a self) -> Self::EmptyGuard;
-}
-
-/// Wrapper that allows creating `static`s with [`SetMock`] implementations.
+/// Wrapper that allows creating `static`s with mock state.
 #[derive(Debug)]
 pub struct Static<T> {
     cell: OnceCell<T>,
@@ -315,30 +264,9 @@ where
     }
 }
 
-/// Wrapper that allows proxying exclusive accesses to the wrapped object. `Wrap<T>`
-/// is similar to `Into<T> + BorrowMut<T>`, but without the necessity to implement `Borrow<T>`
-/// (which would be unsound for the desired use cases), or deal with impossibility to
-/// blanket-implement `Into<T>`.
-pub trait Wrap<T>: From<T> {
-    /// Returns the wrapped value.
-    fn into_inner(self) -> T;
-    /// Returns an exclusive reference to the wrapped value.
-    fn as_mut(&mut self) -> &mut T;
-}
-
-impl<T> Wrap<T> for T {
-    fn into_inner(self) -> T {
-        self
-    }
-
-    fn as_mut(&mut self) -> &mut T {
-        self
-    }
-}
-
 /// State of a mock.
 pub trait Mock: Sized {
-    /// FIXME
+    #[doc(hidden)]
     type Base: Wrap<Self> + CheckDelegate;
 
     /// Wrapper around [`Self::Base`] allowing to share it across test code and the main program.
@@ -354,7 +282,7 @@ pub trait Mock: Sized {
     #[doc(hidden)]
     fn instance() -> &'static Static<Self::Shared>;
 
-    /// FIXME
+    /// Sets the mock state and returns an exclusive guard to the shared state.
     fn set(state: Self) -> MockGuard<Self> {
         let cell = Self::instance().cell.get_or_init(<Self::Shared>::default);
         MockGuard {
@@ -362,7 +290,7 @@ pub trait Mock: Sized {
         }
     }
 
-    /// FIXME
+    /// Sets the default mock state.
     fn set_default() -> MockGuard<Self>
     where
         Self: Default,
@@ -370,7 +298,11 @@ pub trait Mock: Sized {
         Self::set(Self::default())
     }
 
-    /// FIXME
+    /// Locks write access to the mock state without setting the state. This is useful
+    /// for [shared mocks] to ensure that tests not using mocks do not observe mocks
+    /// set by other tests.
+    ///
+    /// [shared mocks]: crate::Shared
     fn lock() -> EmptyGuard<Self>
     where
         Self::Shared: LockMock<'static, Self::Base>,
@@ -382,6 +314,20 @@ pub trait Mock: Sized {
     }
 }
 
+/// Exclusive guard to set the mock state.
+///
+/// A guard can be used to check / adjust the mock state during the test.
+/// Dropping the guard also unsets the mock state, so that targeted functions are no longer mocked.
+///
+/// In case of [shared mocks], guards also provided synchronization across concurrently
+/// executing tests: until a guard is dropped, other threads attempting
+/// to call [`Mock::set()`] will block. Unfortunately, this is not always sufficient
+/// to have good results; see [`Shared`](crate::Shared) docs for discussion.
+///
+/// [shared mocks]: crate::Shared
+///
+/// # Examples
+///
 /// FIXME
 pub struct MockGuard<T: Mock> {
     inner: <T::Shared as SetMock<'static, T::Base>>::Guard,
@@ -406,7 +352,7 @@ impl<T: Mock> MockGuard<T> {
     }
 }
 
-/// FIXME
+/// Exclusive guard to set the mock state without an attached state.
 pub struct EmptyGuard<T: Mock>
 where
     T::Shared: LockMock<'static, T::Base>,
@@ -423,6 +369,11 @@ where
     }
 }
 
+/// A lightweight wrapper around the state (essentially, a [`RefCell`]) allowing to easily
+/// mutate it in mock code.
+///
+/// # Examples
+///
 /// FIXME
 #[derive(Debug, Default)]
 pub struct Mut<T> {
@@ -431,14 +382,19 @@ pub struct Mut<T> {
 }
 
 impl<T> Mut<T> {
-    /// FIXME
+    /// Returns an exclusive reference to the underlying mock.
+    ///
+    /// Beware that while the reference is alive, further calls to functions in the same mock
+    /// (including indirect ones, e.g., performed from the tested program code)
+    /// will not be able to retrieve the state via this method; this will result
+    /// in a panic. To deal with this, you can create short lived state refs a la
+    /// `this.borrow().do_something()`, or enclose the reference into an additional scope.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a reference to the same mock state is alive, as described above.
     pub fn borrow(&self) -> impl ops::DerefMut<Target = T> + '_ {
         self.inner.borrow_mut()
-    }
-
-    /// FIXME
-    pub fn into_inner(self) -> T {
-        self.inner.into_inner()
     }
 }
 
@@ -464,81 +420,6 @@ impl<T> Wrap<T> for Mut<T> {
 impl<T> Delegate for Mut<T> {
     fn delegate_switch(&self) -> &DelegateSwitch {
         &self.switch
-    }
-}
-
-/// FIXME
-pub trait CheckDelegate {
-    /// FIXME
-    fn should_delegate(&self) -> bool {
-        false
-    }
-}
-
-/// FIXME
-pub trait Delegate {
-    /// FIXME
-    fn delegate_switch(&self) -> &DelegateSwitch;
-
-    /// FIXME
-    fn call_real<R>(&self, action: impl FnOnce() -> R) -> R {
-        let switch = <Self as Delegate>::delegate_switch(self);
-        switch.0.set(DelegateMode::RealImpl);
-        let _guard = DelegateGuard { switch };
-        action()
-    }
-
-    /// FIXME
-    fn call_real_once<R>(&self, action: impl FnOnce() -> R) -> R {
-        let switch = <Self as Delegate>::delegate_switch(self);
-        switch.0.set(DelegateMode::RealImplOnce);
-        let _guard = DelegateGuard { switch };
-        action()
-    }
-}
-
-impl<T: Delegate> CheckDelegate for T {
-    fn should_delegate(&self) -> bool {
-        self.delegate_switch().should_delegate()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum DelegateMode {
-    Inactive,
-    RealImpl,
-    RealImplOnce,
-}
-
-impl Default for DelegateMode {
-    fn default() -> Self {
-        Self::Inactive
-    }
-}
-
-/// Switch to (de)activate fallback implementations of mocked functions.
-#[derive(Debug, Default)]
-pub struct DelegateSwitch(Cell<DelegateMode>);
-
-#[doc(hidden)]
-impl DelegateSwitch {
-    pub fn should_delegate(&self) -> bool {
-        let mode = self.0.get();
-        if mode == DelegateMode::RealImplOnce {
-            self.0.set(DelegateMode::Inactive);
-        }
-        mode != DelegateMode::Inactive
-    }
-}
-
-#[derive(Debug)]
-struct DelegateGuard<'a> {
-    switch: &'a DelegateSwitch,
-}
-
-impl Drop for DelegateGuard<'_> {
-    fn drop(&mut self) {
-        self.switch.0.set(DelegateMode::Inactive);
     }
 }
 

@@ -18,7 +18,7 @@ use crate::{GetMock, Guard, LockMock, SetMock};
 /// Unlike [`ThreadLocal`](crate::ThreadLocal) wrapper, this one shares the state across
 /// threads, with state synchronization via reentrant mutexes (to allow for recursive calls).
 /// Setting the state is synchronized via a mutex as well: while one test thread
-/// has a [`SharedGuard`], other tests attempting to set the state will block.
+/// has a [`MockGuard`](crate::MockGuard), other tests attempting to set the state will block.
 ///
 /// # Pitfalls
 ///
@@ -27,7 +27,7 @@ use crate::{GetMock, Guard, LockMock, SetMock};
 /// you want, and there are ways to deal with this issue:
 ///
 /// - Run tests one at a time via `cargo test -j 1`.
-/// - Call [`LockMock::lock()`] at the beginning of the relevant tests.
+/// - Call [`Mock::lock()`](crate::Mock::lock()) at the beginning of the relevant tests.
 ///
 /// # Examples
 ///

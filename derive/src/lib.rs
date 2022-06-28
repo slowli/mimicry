@@ -5,6 +5,8 @@
 //! [`mimicry`]: https://docs.rs/mimicry/
 
 #![recursion_limit = "128"]
+// Documentation settings.
+#![doc(html_root_url = "https://docs.rs/mimicry-derive/0.1.0")]
 // Linter settings.
 #![warn(missing_debug_implementations, missing_docs, bare_trait_objects)]
 #![warn(clippy::all, clippy::pedantic)]
@@ -64,7 +66,8 @@ pub fn mock_derive(input: TokenStream) -> TokenStream {
 /// ## `rename`
 ///
 /// Specifies a pattern to use when accessing mock impl methods. A pattern is a string with `{}`
-/// denoting a placeholder for the mocked function name.
+/// denoting a placeholder for the mocked function name. For example, `mock_{}` pattern will
+/// rename `len` to `mock_len`.
 ///
 /// This attribute is mostly useful for impl blocks.
 ///

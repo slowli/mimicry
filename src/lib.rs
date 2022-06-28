@@ -43,6 +43,14 @@
 //! - Even if mocking logic does not use certain args, they need to be properly constructed,
 //!   which, depending on the case, may defy the reasons behind using mocks.
 //!
+//! # Crate features
+//!
+//! ## `shared`
+//!
+//! *(Off by default)*
+//!
+//! Enables [mocks](Shared) that can be used across multiple threads.
+//!
 //! # Examples
 //!
 //! ## Basics
@@ -202,6 +210,9 @@
 //! assert_eq!(count, 3);
 //! ```
 
+// Documentation settings.
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc(html_root_url = "https://docs.rs/mimicry/0.1.0")]
 // Linter settings.
 #![warn(missing_debug_implementations, missing_docs, bare_trait_objects)]
 #![warn(clippy::all, clippy::pedantic)]

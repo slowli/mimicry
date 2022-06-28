@@ -71,6 +71,7 @@ use crate::{CallMock, Context, FallbackSwitch, GetMock, LockMock, SetMock};
 /// # some_test();
 /// ```
 #[derive(Debug)]
+#[cfg_attr(docsrs, doc(cfg(feature = "shared")))]
 pub struct Shared<T> {
     inner: ReentrantMutex<RefCell<Option<T>>>,
     write_lock: Mutex<()>,
@@ -143,6 +144,7 @@ impl<T: 'static> CallMock<T> for SharedRef<'_, T> {
 
 /// Exclusive lock on the [`Shared`] mock state.
 #[derive(Debug)]
+#[cfg_attr(docsrs, doc(cfg(feature = "shared")))]
 pub struct SharedGuard<'a, T> {
     mock: &'a Shared<T>,
     _guard: MutexGuard<'a, ()>,

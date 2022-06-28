@@ -27,9 +27,10 @@ use crate::{GetMock, Guard, SetMock};
 /// # impl mimicry::CheckRealCall for MockState {}
 ///
 /// #[test]
+/// # fn eat_attr() {}
 /// fn some_test() {
 ///     // Sets the mock state until `mock_guard` is dropped.
-///     let mock_guard = MockState::set_default();
+///     let mock_guard = MockState::default().set_as_mock();
 ///     // Call mocked functions (maybe, indirectly). All calls
 ///     // need to happen from the original test thread.
 ///     let state = mock_guard.into_inner();

@@ -100,7 +100,7 @@
 //! }
 //!
 //! // Test code.
-//! let guard = SearchMock::set_default();
+//! let guard = SearchMock::default().set_as_mock();
 //! assert_eq!(search("test", '?'), Some(42));
 //! assert_eq!(search("?!", '?'), None);
 //! assert_eq!(search("needle?", '?'), Some(1));
@@ -219,7 +219,7 @@
 //!     }
 //! }
 //!
-//! let guard = CountingMock::set_default();
+//! let guard = CountingMock::default().set_as_mock();
 //! Test.do_something();
 //! assert_eq!(Test.lifetimes(), "");
 //! assert_eq!(Test.next(), None);
@@ -300,19 +300,11 @@ pub trait Mock: Sized {
     fn instance() -> &'static Static<Self::Shared>;
 
     /// Sets the mock state and returns an exclusive guard to the shared state.
-    fn set(state: Self) -> MockGuard<Self> {
+    fn set_as_mock(self) -> MockGuard<Self> {
         let cell = Self::instance().cell.get_or_init(<Self::Shared>::default);
         MockGuard {
-            inner: cell.set(state.into()),
+            inner: cell.set(self.into()),
         }
-    }
-
-    /// Sets the default mock state.
-    fn set_default() -> MockGuard<Self>
-    where
-        Self: Default,
-    {
-        Self::set(Self::default())
     }
 
     /// Locks write access to the mock state without setting the state. This is useful
@@ -338,7 +330,7 @@ pub trait Mock: Sized {
 ///
 /// In case of [shared mocks], guards also provided synchronization across concurrently
 /// executing tests: until a guard is dropped, other threads attempting
-/// to call [`Mock::set()`] will block. Unfortunately, this is not always sufficient
+/// to call [`Mock::set_as_mock()`] will block. Unfortunately, this is not always sufficient
 /// to have good results; see [`Shared`](crate::Shared) docs for discussion.
 ///
 /// [shared mocks]: crate::Shared
@@ -362,7 +354,7 @@ pub trait Mock: Sized {
 /// }
 ///
 /// assert_eq!(answer(), 42);
-/// let mut guard: MockGuard<ValueMock> = ValueMock::set_default();
+/// let mut guard: MockGuard<_> = ValueMock::default().set_as_mock();
 /// assert_eq!(answer(), 0);
 /// guard.with(|mock| { mock.0 = 23; });
 /// // ^ updates mock state without releasing the guard
@@ -433,7 +425,7 @@ where
 ///     }
 /// }
 ///
-/// let mut guard = CounterMock::set_default();
+/// let mut guard = CounterMock::default().set_as_mock();
 /// assert_eq!(answer(), 1);
 /// assert_eq!(answer(), 2);
 /// assert_eq!(answer(), 3);

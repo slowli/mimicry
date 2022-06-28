@@ -349,9 +349,7 @@ mod tests {
             {
                 let instance = <TestMock as mimicry::Mock>::instance();
                 if let Some(mock_ref) = mimicry::GetMock::get(instance) {
-                    if <TestMock as mimicry::Delegate>::delegate_switch(&*mock_ref)
-                        .map_or(false, mimicry::DelegateSwitch::should_delegate)
-                    {
+                    if !mimicry::CheckRealCall::should_call_real(&*mock_ref) {
                         return TestMock::test(&*mock_ref, __arg0, __arg1,);
                     }
                 }

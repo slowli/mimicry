@@ -57,7 +57,7 @@ use crate::{GetMock, Guard, LockMock, SetMock};
 /// # fn catch() {}
 /// fn some_test() {
 ///     // Sets the mock state until `mock_guard` is dropped.
-///     let mock_guard = MockState::set_default();
+///     let mock_guard = MockState::default().set_as_mock();
 ///     // Call mocked functions (maybe, indirectly). Calls may originate
 ///     // from different threads.
 ///     let threads: Vec<_> = (0..5).map(|_| thread::spawn(answer)).collect();

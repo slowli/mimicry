@@ -35,7 +35,7 @@ fn mock_basics() {
     }
 
     let recovered = {
-        let guard = SearchMock::set(SearchMock::default());
+        let guard = SearchMock::default().set_as_mock();
         assert_eq!(search("test", '?'), Some(42));
         assert_eq!(search("?!", '?'), None);
         assert_eq!(search("needle?", '?'), Some(1));
@@ -82,7 +82,7 @@ fn mock_with_lifetimes() {
     assert_eq!(tail(&mut bytes), Some(&b't'));
     assert_eq!(bytes, *b"t\0\0\0");
 
-    let _guard = TailMock::set_default();
+    let _guard = TailMock::default().set_as_mock();
     let mut bytes = *b"test";
     assert_eq!(tail(&mut bytes), Some(&0));
     assert_eq!(bytes, *b"test");
@@ -109,7 +109,7 @@ fn mock_consuming_args() {
         }
     }
 
-    let _guard = ConsumeMock::set_default();
+    let _guard = ConsumeMock::default().set_as_mock();
     let bytes = b"test".to_vec();
     assert_eq!(consume(bytes).unwrap(), "ASCII");
     let bytes = b"\xD0\xBB\xD1\x96\xD0\xBB".to_vec();
@@ -159,7 +159,7 @@ fn mock_for_generic_function() {
         }
     }
 
-    let guard = GenericMock::set_default();
+    let guard = GenericMock::default().set_as_mock();
     assert_eq!(len("value"), 5);
     assert_eq!(len(String::from("test")), 4);
     let mut map = HashMap::new();
@@ -231,10 +231,11 @@ fn mock_in_impl() {
         }
     }
 
-    let guard = MockState::set(MockState {
+    let state = MockState {
         min_length: 3,
         switch: RealCallSwitch::default(),
-    });
+    };
+    let guard = state.set_as_mock();
     assert_eq!(Wrapper("test!").len(), 5);
     assert_eq!(Wrapper("test").len(), 42);
     assert_eq!(Wrapper(String::from("test")).len(), 42);
@@ -299,7 +300,7 @@ fn mock_in_impl_trait() {
     let mut flip = Flip::default();
     assert_eq!(flip.by_ref().take(5).collect::<Vec<_>>(), [1, 0, 1, 0, 1]);
 
-    let guard = IterMock::set_default();
+    let guard = IterMock::default().set_as_mock();
     assert_eq!(flip.by_ref().take(5).collect::<Vec<_>>(), [0, 1, 2, 3, 4]);
     let mut zero = Const(0);
     assert_eq!(zero.by_ref().take(3).collect::<Vec<_>>(), [5, 6, 7]);
@@ -344,7 +345,7 @@ fn recursive_fn() {
 
     assert_eq!(factorial(4, &mut 1), 24);
 
-    let mut guard = FactorialMock::set_default();
+    let mut guard = FactorialMock::default().set_as_mock();
     assert_eq!(factorial(4, &mut 1), 1);
     assert_eq!(factorial(5, &mut 1), 120);
     assert_eq!(factorial(10, &mut 1), 435_456_000);
@@ -382,7 +383,7 @@ fn value() -> u32 {
 #[test]
 #[allow(clippy::needless_collect)] // needed for threads to be spawned concurrently
 fn single_shared_mock_in_multi_thread_env() {
-    let guard = ValueMock::set_default();
+    let guard = ValueMock::default().set_as_mock();
     let thread_handles: Vec<_> = (0..5)
         .map(|_| thread::spawn(|| (0..10).map(|_| value()).sum::<u32>()))
         .collect();
@@ -402,7 +403,7 @@ fn per_thread_mock_in_multi_thread_env() {
     let thread_handles: Vec<_> = (0..5)
         .map(|_| {
             thread::spawn(|| {
-                let _guard = ValueMock::set_default();
+                let _guard = ValueMock::default().set_as_mock();
                 (0..10).map(|_| value()).collect::<Vec<_>>()
             })
         })
@@ -430,7 +431,7 @@ fn locking_shared_mocks() {
     }
 
     fn second_test() {
-        let _guard = ValueMock::set(ValueMock(42.into()));
+        let _guard = ValueMock(42.into()).set_as_mock();
         for i in 42..52 {
             assert_eq!(value(), i);
             thread::sleep(Duration::from_millis(1));

@@ -63,7 +63,7 @@ impl SearchMock {
 }
 
 // Test code.
-let guard = SearchMock::set_default();
+let guard = SearchMock::default().set_as_mock();
 assert_eq!(search("test", '?'), Some(42));
 assert_eq!(search("needle?", '?'), Some(1));
 assert_eq!(search("needle?", 'd'), Some(3));

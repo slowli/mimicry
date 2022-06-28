@@ -220,6 +220,11 @@
 
 use once_cell::sync::OnceCell;
 
+use core::{
+    cell::{Cell, RefCell},
+    ops,
+};
+
 #[cfg(feature = "shared")]
 mod shared;
 mod tls;
@@ -228,8 +233,6 @@ mod tls;
 pub use crate::shared::{Shared, SharedGuard};
 pub use crate::tls::{ThreadLocal, ThreadLocalGuard};
 pub use mimicry_derive::{mock, Mock};
-
-use core::{cell::Cell, ops};
 
 /// Interface to get mock state.
 #[doc(hidden)] // only used in macros
@@ -264,14 +267,6 @@ pub trait SetMock<'a, T> {
     ///
     /// [shared mocks]: crate::Shared
     fn set(&'a self, state: T) -> Self::Guard;
-
-    /// Sets the default mock state.
-    fn set_default(&'a self) -> Self::Guard
-    where
-        T: Default,
-    {
-        self.set(T::default())
-    }
 }
 
 /// Interface to lock mock state changes without [setting](SetMock) the state.
@@ -314,37 +309,80 @@ where
     }
 }
 
-impl<'a, T, S> SetMock<'a, T> for Static<S>
-where
-    S: SetMock<'a, T> + Default,
-{
-    type Guard = S::Guard;
+/// State of a mock.
+pub trait Mock: Sized {
+    /// FIXME
+    type Base: From<Self> + CheckDelegate;
 
-    fn set(&'a self, state: T) -> Self::Guard {
-        let cell = self.cell.get_or_init(S::default);
-        cell.set(state)
+    /// Wrapper around [`Self::Base`] allowing to share it across test code and the main program.
+    #[doc(hidden)]
+    type Shared: GetMock<'static, Self::Base>
+        + SetMock<'static, Self::Base>
+        + 'static
+        + Default
+        + Send
+        + Sync;
+
+    /// Returns the shared wrapper around this state.
+    #[doc(hidden)]
+    fn instance() -> &'static Static<Self::Shared>;
+
+    /// FIXME
+    fn set(state: Self) -> <Self::Shared as SetMock<'static, Self::Base>>::Guard {
+        let cell = Self::instance().cell.get_or_init(<Self::Shared>::default);
+        cell.set(state.into())
     }
-}
 
-impl<'a, T, S> LockMock<'a, T> for Static<S>
-where
-    S: LockMock<'a, T> + Default,
-{
-    type EmptyGuard = S::EmptyGuard;
+    /// FIXME
+    fn set_default() -> <Self::Shared as SetMock<'static, Self::Base>>::Guard
+    where
+        Self: Default,
+    {
+        Self::set(Self::default())
+    }
 
-    fn lock(&'a self) -> Self::EmptyGuard {
-        let cell = self.cell.get_or_init(S::default);
+    /// FIXME
+    fn lock() -> <Self::Shared as LockMock<'static, Self::Base>>::EmptyGuard
+    where
+        Self::Shared: LockMock<'static, Self::Base>,
+    {
+        let cell = Self::instance().cell.get_or_init(<Self::Shared>::default);
         cell.lock()
     }
 }
 
-/// State of a mock.
-pub trait Mock: CheckDelegate + Sized {
-    /// Wrapper around this state allowing to share it across test code and the main program.
-    type Shared: for<'a> GetMock<'a, Self> + for<'a> SetMock<'a, Self> + 'static + Send + Sync;
+/// FIXME
+#[derive(Debug, Default)]
+pub struct Mut<T> {
+    inner: RefCell<T>,
+    switch: DelegateSwitch,
+}
 
-    /// Returns the shared wrapper around this state.
-    fn instance() -> &'static Static<Self::Shared>;
+impl<T> Mut<T> {
+    /// FIXME
+    pub fn borrow(&self) -> impl ops::DerefMut<Target = T> + '_ {
+        self.inner.borrow_mut()
+    }
+
+    /// FIXME
+    pub fn into_inner(self) -> T {
+        self.inner.into_inner()
+    }
+}
+
+impl<T> From<T> for Mut<T> {
+    fn from(inner: T) -> Self {
+        Self {
+            inner: RefCell::new(inner),
+            switch: DelegateSwitch::default(),
+        }
+    }
+}
+
+impl<T> Delegate for Mut<T> {
+    fn delegate_switch(&self) -> &DelegateSwitch {
+        &self.switch
+    }
 }
 
 /// FIXME

@@ -1,8 +1,13 @@
-use std::{borrow::Borrow, collections::HashMap, hash::Hash, mem, thread};
+use std::{
+    borrow::Borrow,
+    collections::HashMap,
+    hash::Hash,
+    mem,
+    sync::atomic::{AtomicBool, AtomicU32, Ordering},
+    thread,
+};
 
-#[cfg(feature = "shared")]
-use mimicry::LockMock;
-use mimicry::{mock, Context, Mock, SetMock};
+use mimicry::{mock, Delegate, DelegateSwitch, Mock, Mut};
 
 #[test]
 fn mock_basics() {
@@ -12,29 +17,30 @@ fn mock_basics() {
     }
 
     #[derive(Default, Mock)]
-    #[cfg_attr(feature = "shared", mock(shared))]
+    #[cfg_attr(feature = "shared", mock(mut, shared))]
+    #[cfg_attr(not(feature = "shared"), mock(mut))]
     struct SearchMock {
         called_times: usize,
     }
 
     impl SearchMock {
-        fn mock_search(mut cx: Context<'_, Self>, haystack: &str, needle: char) -> Option<usize> {
-            cx.state().called_times += 1;
+        fn mock_search(this: &Mut<Self>, haystack: &str, needle: char) -> Option<usize> {
+            this.borrow().called_times += 1;
             match haystack {
                 "test" => Some(42),
                 short if short.len() <= 2 => None,
-                _ => cx.fallback(|| search(haystack, if needle == '?' { 'e' } else { needle })),
+                _ => this.call_real(|| search(haystack, if needle == '?' { 'e' } else { needle })),
             }
         }
     }
 
     let recovered = {
-        let guard = SearchMock::instance().set(SearchMock::default());
+        let guard = SearchMock::set(SearchMock::default());
         assert_eq!(search("test", '?'), Some(42));
         assert_eq!(search("?!", '?'), None);
         assert_eq!(search("needle?", '?'), Some(1));
         assert_eq!(search("needle?", 'd'), Some(3));
-        guard.into_inner()
+        guard.into_inner().into_inner() // FIXME: suboptimal API
     };
     assert_eq!(recovered.called_times, 4);
 
@@ -58,14 +64,16 @@ fn mock_with_lifetimes() {
 
     #[derive(Default, Mock)]
     #[cfg_attr(feature = "shared", mock(shared))]
-    struct TailMock;
+    struct TailMock {
+        switch: DelegateSwitch,
+    }
 
     impl TailMock {
-        fn tail<'a>(mut ctx: Context<'_, Self>, bytes: &'a mut [u8]) -> Option<&'a u8> {
+        fn tail<'a>(&self, bytes: &'a mut [u8]) -> Option<&'a u8> {
             if bytes == b"test" {
                 Some(&0)
             } else {
-                ctx.fallback(|| tail(bytes))
+                self.call_real(|| tail(bytes))
             }
         }
     }
@@ -74,7 +82,7 @@ fn mock_with_lifetimes() {
     assert_eq!(tail(&mut bytes), Some(&b't'));
     assert_eq!(bytes, *b"t\0\0\0");
 
-    let _guard = TailMock::instance().set_default();
+    let _guard = TailMock::set_default();
     let mut bytes = *b"test";
     assert_eq!(tail(&mut bytes), Some(&0));
     assert_eq!(bytes, *b"test");
@@ -89,19 +97,19 @@ fn mock_consuming_args() {
 
     #[derive(Default, Mock)]
     #[cfg_attr(feature = "shared", mock(shared))]
-    struct ConsumeMock;
+    struct ConsumeMock(DelegateSwitch);
 
     impl ConsumeMock {
-        fn consume(mut cx: Context<'_, Self>, bytes: Vec<u8>) -> Option<String> {
+        fn consume(&self, bytes: Vec<u8>) -> Option<String> {
             if bytes.is_ascii() {
                 Some(String::from("ASCII"))
             } else {
-                cx.fallback(|| consume(bytes))
+                self.call_real(|| consume(bytes))
             }
         }
     }
 
-    let _guard = ConsumeMock::instance().set_default();
+    let _guard = ConsumeMock::set_default();
     let bytes = b"test".to_vec();
     assert_eq!(consume(bytes).unwrap(), "ASCII");
     let bytes = b"\xD0\xBB\xD1\x96\xD0\xBB".to_vec();
@@ -127,34 +135,31 @@ fn mock_for_generic_function() {
     }
 
     #[derive(Default, Mock)]
-    #[cfg_attr(feature = "shared", mock(shared))]
+    #[cfg_attr(feature = "shared", mock(mut, shared))]
+    #[cfg_attr(not(feature = "shared"), mock(mut))]
     struct GenericMock {
         len_args: Vec<String>,
         get_key_responses: Vec<usize>,
     }
 
     impl GenericMock {
-        fn len(mut cx: Context<'_, Self>, value: impl AsRef<str>) -> usize {
-            cx.state().len_args.push(value.as_ref().to_owned());
-            cx.fallback(|| len(value))
+        fn len(this: &Mut<Self>, value: impl AsRef<str>) -> usize {
+            this.borrow().len_args.push(value.as_ref().to_owned());
+            this.call_real(|| len(value))
         }
 
-        fn get_key<K, Q: ?Sized>(
-            mut cx: Context<'_, Self>,
-            map: &HashMap<K, usize>,
-            key: &Q,
-        ) -> usize
+        fn get_key<K, Q: ?Sized>(this: &Mut<Self>, map: &HashMap<K, usize>, key: &Q) -> usize
         where
             K: Borrow<Q> + Eq + Hash,
             Q: Eq + Hash,
         {
-            let response = cx.fallback(|| get_key(map, key));
-            cx.state().get_key_responses.push(response);
+            let response = this.call_real(|| get_key(map, key));
+            this.borrow().get_key_responses.push(response);
             response
         }
     }
 
-    let guard = GenericMock::instance().set_default();
+    let guard = GenericMock::set_default();
     assert_eq!(len("value"), 5);
     assert_eq!(len(String::from("test")), 4);
     let mut map = HashMap::new();
@@ -164,7 +169,7 @@ fn mock_for_generic_function() {
     assert_eq!(get_key(&map, "???"), 0);
     assert_eq!(get_key(&map, "42"), 42);
 
-    let mock = guard.into_inner();
+    let mock = guard.into_inner().into_inner();
     assert_eq!(mock.len_args, ["value", "test"]);
     assert_eq!(mock.get_key_responses, [23, 0, 42]);
 }
@@ -197,35 +202,39 @@ fn mock_in_impl() {
     #[cfg_attr(feature = "shared", mock(shared))]
     struct MockState {
         min_length: usize,
+        switch: DelegateSwitch,
     }
 
     impl MockState {
-        fn len<T: AsRef<str>>(mut cx: Context<'_, Self>, this: &Wrapper<T>) -> usize {
-            if this.0.as_ref() == "test" {
+        fn len<T: AsRef<str>>(&self, wrapper: &Wrapper<T>) -> usize {
+            if wrapper.0.as_ref() == "test" {
                 42
             } else {
-                cx.fallback(|| this.len())
+                self.call_real(|| wrapper.len())
             }
         }
 
         fn push<'a>(
-            mut cx: Context<'_, Self>,
-            this: &'a mut Wrapper<String>,
+            &self,
+            wrapper: &'a mut Wrapper<String>,
             s: impl AsRef<str>,
         ) -> &'a mut Wrapper<String> {
-            if s.as_ref().len() < cx.state().min_length {
-                this
+            if s.as_ref().len() < self.min_length {
+                wrapper
             } else {
-                cx.fallback(|| this.push(s))
+                self.call_real(|| wrapper.push(s))
             }
         }
 
-        fn mock_take(_: Context<'_, Self>, this: &mut Wrapper<String>) -> String {
+        fn mock_take(&self, this: &mut Wrapper<String>) -> String {
             this.0.pop().map_or_else(String::new, String::from)
         }
     }
 
-    let guard = MockState::instance().set(MockState { min_length: 3 });
+    let guard = MockState::set(MockState {
+        min_length: 3,
+        switch: DelegateSwitch::default(),
+    });
     assert_eq!(Wrapper("test!").len(), 5);
     assert_eq!(Wrapper("test").len(), 42);
     assert_eq!(Wrapper(String::from("test")).len(), 42);
@@ -275,13 +284,12 @@ fn mock_in_impl_trait() {
     #[derive(Default, Mock)]
     #[cfg_attr(feature = "shared", mock(shared))]
     struct IterMock {
-        count: usize,
+        count: AtomicU32,
     }
 
     impl IterMock {
-        fn iter_next<I>(mut ctx: Context<'_, Self>, _: &mut I) -> Option<u8> {
-            let count = ctx.state().count;
-            ctx.state().count += 1;
+        fn iter_next<I>(&self, _: &mut I) -> Option<u8> {
+            let count = self.count.fetch_add(1, Ordering::Relaxed);
             u8::try_from(count).ok()
         }
     }
@@ -289,7 +297,7 @@ fn mock_in_impl_trait() {
     let mut flip = Flip::default();
     assert_eq!(flip.by_ref().take(5).collect::<Vec<_>>(), [1, 0, 1, 0, 1]);
 
-    let guard = IterMock::instance().set_default();
+    let guard = IterMock::set_default();
     assert_eq!(flip.by_ref().take(5).collect::<Vec<_>>(), [0, 1, 2, 3, 4]);
     let mut zero = Const(0);
     assert_eq!(zero.by_ref().take(3).collect::<Vec<_>>(), [5, 6, 7]);
@@ -315,32 +323,33 @@ fn recursive_fn() {
     #[derive(Default, Mock)]
     #[cfg_attr(feature = "shared", mock(shared))]
     struct FactorialMock {
-        fallback_once: bool,
+        fallback_once: AtomicBool,
+        switch: DelegateSwitch,
     }
 
     impl FactorialMock {
-        fn factorial(mut cx: Context<'_, Self>, n: u64, acc: &mut u64) -> u64 {
+        fn factorial(&self, n: u64, acc: &mut u64) -> u64 {
             if n < 5 {
                 *acc // finish the recursion early
-            } else if cx.state().fallback_once {
-                cx.fallback_once(|| factorial(n, acc))
+            } else if self.fallback_once.load(Ordering::Relaxed) {
+                self.call_real_once(|| factorial(n, acc))
             } else {
                 // Fallback should be applied to both calls here
-                cx.fallback(|| factorial(n, acc) * factorial(n - 5, &mut 1))
+                self.call_real(|| factorial(n, acc) * factorial(n - 5, &mut 1))
             }
         }
     }
 
     assert_eq!(factorial(4, &mut 1), 24);
 
-    let mut guard = FactorialMock::instance().set_default();
+    let mut guard = FactorialMock::set_default();
     assert_eq!(factorial(4, &mut 1), 1);
     assert_eq!(factorial(5, &mut 1), 120);
     assert_eq!(factorial(10, &mut 1), 435_456_000);
     assert_eq!(factorial(4, &mut 1), 1);
 
     guard.with(|mock| {
-        mock.fallback_once = true;
+        mock.fallback_once = AtomicBool::new(true);
     });
     assert_eq!(factorial(4, &mut 1), 1);
     assert_eq!(factorial(5, &mut 1), 5);
@@ -361,17 +370,15 @@ fn single_shared_mock_in_multi_thread_env() {
 
     #[derive(Default, Mock)]
     #[mock(shared)]
-    struct ValueMock(u32);
+    struct ValueMock(AtomicU32);
 
     impl ValueMock {
-        fn value(mut cx: Context<'_, Self>) -> u32 {
-            let value = cx.state().0;
-            cx.state().0 += 1;
-            value
+        fn value(&self) -> u32 {
+            self.0.fetch_add(1, Ordering::SeqCst)
         }
     }
 
-    let guard = ValueMock::instance().set_default();
+    let guard = ValueMock::set_default();
     let thread_handles: Vec<_> = (0..5)
         .map(|_| thread::spawn(|| (0..10).map(|_| value()).sum::<u32>()))
         .collect();
@@ -381,7 +388,7 @@ fn single_shared_mock_in_multi_thread_env() {
         .sum::<u32>();
     assert_eq!(sum, 49 * 50 / 2);
 
-    let count = guard.into_inner().0;
+    let count = guard.into_inner().0.into_inner();
     assert_eq!(count, 50);
 }
 
@@ -395,20 +402,18 @@ fn per_thread_mock_in_multi_thread_env() {
 
     #[derive(Default, Mock)]
     #[cfg_attr(feature = "shared", mock(shared))]
-    struct ValueMock(u32);
+    struct ValueMock(AtomicU32);
 
     impl ValueMock {
-        fn value(mut cx: Context<'_, Self>) -> u32 {
-            let value = cx.state().0;
-            cx.state().0 += 1;
-            value
+        fn value(&self) -> u32 {
+            self.0.fetch_add(1, Ordering::SeqCst)
         }
     }
 
     let thread_handles: Vec<_> = (0..5)
         .map(|_| {
             thread::spawn(|| {
-                let _guard = ValueMock::instance().set_default();
+                let _guard = ValueMock::set_default();
                 (0..10).map(|_| value()).collect::<Vec<_>>()
             })
         })
@@ -434,18 +439,16 @@ fn locking_shared_mocks() {
 
     #[derive(Mock)]
     #[mock(shared)]
-    struct ValueMock(u32);
+    struct ValueMock(AtomicU32);
 
     impl ValueMock {
-        fn value(mut cx: Context<'_, Self>) -> u32 {
-            let value = cx.state().0;
-            cx.state().0 += 1;
-            value
+        fn value(&self) -> u32 {
+            self.0.fetch_add(1, Ordering::SeqCst)
         }
     }
 
     fn first_test() {
-        let _guard = ValueMock::instance().lock();
+        let _guard = ValueMock::lock();
         for _ in 0..10 {
             assert_eq!(value(), 0);
             thread::sleep(Duration::from_millis(1));
@@ -453,7 +456,7 @@ fn locking_shared_mocks() {
     }
 
     fn second_test() {
-        let _guard = ValueMock::instance().set(ValueMock(42));
+        let _guard = ValueMock::set(ValueMock(42.into()));
         for i in 42..52 {
             assert_eq!(value(), i);
             thread::sleep(Duration::from_millis(1));

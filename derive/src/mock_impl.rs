@@ -3,13 +3,34 @@
 use darling::{FromDeriveInput, FromMeta};
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{parse_quote, spanned::Spanned, DeriveInput, GenericParam, Generics, Ident};
+use syn::{
+    parse_quote, spanned::Spanned, Data, DataStruct, DeriveInput, GenericParam, Generics, Ident,
+    Index, Type, TypePath,
+};
 
 use crate::utils::find_meta_attrs;
 
 #[derive(Debug, Default, FromMeta)]
 struct MockAttrs {
+    #[darling(default)]
     shared: bool,
+    #[darling(rename = "mut", default)]
+    mutable: bool,
+}
+
+#[derive(Debug)]
+enum FieldIdent {
+    Named(Ident),
+    Unnamed(Index),
+}
+
+impl ToTokens for FieldIdent {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        match self {
+            Self::Named(id) => id.to_tokens(tokens),
+            Self::Unnamed(idx) => idx.to_tokens(tokens),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -17,11 +38,46 @@ struct Mock {
     generics: Generics,
     ident: Ident,
     shared: bool,
+    mutable: bool,
+    switch_field: Option<FieldIdent>,
 }
 
 impl Mock {
+    fn detect_switch_field(data: &Data) -> Option<FieldIdent> {
+        if let Data::Struct(DataStruct { fields, .. }) = data {
+            fields.iter().enumerate().find_map(|(i, field)| {
+                if Self::is_switch(&field.ty) {
+                    let ident = field
+                        .ident
+                        .clone()
+                        .map_or_else(|| FieldIdent::Unnamed(Index::from(i)), FieldIdent::Named);
+                    Some(ident)
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        }
+    }
+
+    fn is_switch(ty: &Type) -> bool {
+        if let Type::Path(TypePath { path, .. }) = ty {
+            path.segments
+                .last()
+                .map_or(false, |segment| segment.ident == "DelegateSwitch")
+        } else {
+            false
+        }
+    }
+
     fn impl_mock(&self) -> impl ToTokens {
         let ident = &self.ident;
+        let base = if self.mutable {
+            quote!(mimicry::Mut<Self>)
+        } else {
+            quote!(Self)
+        };
         let wrapper = if self.shared {
             quote!(mimicry::Shared)
         } else {
@@ -29,20 +85,46 @@ impl Mock {
         };
 
         let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
-        let shared_ty = quote!(#wrapper<#ident #ty_generics>);
         let mut where_clause = where_clause.cloned().unwrap_or_else(|| parse_quote!(where));
         where_clause
             .predicates
-            .push(parse_quote!(#wrapper<Self>: Send + Sync));
+            .push(parse_quote!(#wrapper<#base>: Send + Sync));
+
+        // `static` requires an exact type.
+        let shared_ty = if self.mutable {
+            quote!(#wrapper<mimicry::Mut<#ident #ty_generics>>)
+        } else {
+            quote!(#wrapper<#ident #ty_generics>)
+        };
 
         quote! {
             impl #impl_generics mimicry::Mock for #ident #ty_generics #where_clause {
-                type Shared = #wrapper<Self>;
+                type Base = #base;
+                type Shared = #wrapper<Self::Base>;
 
                 fn instance() -> &'static mimicry::Static<Self::Shared> {
                     static SHARED: mimicry::Static<#shared_ty> = mimicry::Static::new();
                     &SHARED
                 }
+            }
+        }
+    }
+
+    fn impl_delegate(&self) -> impl ToTokens {
+        let ident = &self.ident;
+        let (impl_generics, ty_generics, where_clause) = self.generics.split_for_impl();
+
+        if let Some(field) = &self.switch_field {
+            quote! {
+                impl #impl_generics mimicry::Delegate for #ident #ty_generics #where_clause {
+                    fn delegate_switch(&self) -> &mimicry::DelegateSwitch {
+                        &self.#field
+                    }
+                }
+            }
+        } else {
+            quote! {
+                impl #impl_generics mimicry::CheckDelegate for #ident #ty_generics #where_clause {}
             }
         }
     }
@@ -72,6 +154,8 @@ impl FromDeriveInput for Mock {
             generics: input.generics.clone(),
             ident: input.ident.clone(),
             shared: attrs.shared,
+            mutable: attrs.mutable,
+            switch_field: Self::detect_switch_field(&input.data),
         })
     }
 }
@@ -79,7 +163,8 @@ impl FromDeriveInput for Mock {
 impl ToTokens for Mock {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let mock_impl = self.impl_mock();
-        tokens.extend(quote!(#mock_impl));
+        let delegate_impl = self.impl_delegate();
+        tokens.extend(quote!(#mock_impl #delegate_impl));
     }
 }
 

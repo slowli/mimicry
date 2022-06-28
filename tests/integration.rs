@@ -40,7 +40,7 @@ fn mock_basics() {
         assert_eq!(search("?!", '?'), None);
         assert_eq!(search("needle?", '?'), Some(1));
         assert_eq!(search("needle?", 'd'), Some(3));
-        guard.into_inner().into_inner() // FIXME: suboptimal API
+        guard.into_inner()
     };
     assert_eq!(recovered.called_times, 4);
 
@@ -169,7 +169,7 @@ fn mock_for_generic_function() {
     assert_eq!(get_key(&map, "???"), 0);
     assert_eq!(get_key(&map, "42"), 42);
 
-    let mock = guard.into_inner().into_inner();
+    let mock = guard.into_inner();
     assert_eq!(mock.len_args, ["value", "test"]);
     assert_eq!(mock.get_key_responses, [23, 0, 42]);
 }

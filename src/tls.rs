@@ -2,7 +2,7 @@
 
 use core::cell::{Ref, RefCell, RefMut};
 
-use crate::{GetMock, SetMock};
+use crate::{GetMock, Guard, SetMock};
 
 /// Thread-local mock state wrapper.
 ///
@@ -112,17 +112,12 @@ impl<T> Drop for ThreadLocalGuard<'_, T> {
     }
 }
 
-impl<T> ThreadLocalGuard<'_, T> {
-    /// Performs an action on the mock state without releasing the guard. This can be used
-    /// to adjust the mock state, check or take some parts of it (such as responses).
-    #[allow(clippy::missing_panics_doc)] // unwrap() is safe by construction
-    pub fn with<R>(&mut self, action: impl FnOnce(&mut T) -> R) -> R {
+impl<T> Guard<T> for ThreadLocalGuard<'_, T> {
+    fn with<R>(&mut self, action: impl FnOnce(&mut T) -> R) -> R {
         action(self.mock.borrow_mut().as_mut().unwrap())
     }
 
-    /// Consumes this guard and returns the mock state.
-    #[allow(clippy::missing_panics_doc)] // unwrap() is safe by construction
-    pub fn into_inner(self) -> T {
+    fn into_inner(self) -> T {
         self.mock.borrow_mut().take().unwrap()
     }
 }

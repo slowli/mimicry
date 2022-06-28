@@ -8,7 +8,7 @@ use core::{
     ops,
 };
 
-use crate::{GetMock, LockMock, SetMock};
+use crate::{GetMock, Guard, LockMock, SetMock};
 
 /// Wrapper around [`Mock`](crate::Mock) state that provides cross-thread synchronization.
 ///
@@ -166,19 +166,14 @@ pub struct SharedGuard<'a, T> {
     _guard: MutexGuard<'a, ()>,
 }
 
-impl<T: 'static> SharedGuard<'_, T> {
-    /// Performs an action on the mock state without releasing the guard. This can be used
-    /// to adjust the mock state, check or take some parts of it (such as responses).
-    #[allow(clippy::missing_panics_doc)] // unwrap() is safe by construction
-    pub fn with<R>(&mut self, action: impl FnOnce(&mut T) -> R) -> R {
+impl<T: 'static> Guard<T> for SharedGuard<'_, T> {
+    fn with<R>(&mut self, action: impl FnOnce(&mut T) -> R) -> R {
         let locked = self.mock.lock();
         let mut borrowed = locked.borrow_mut();
         action(borrowed.as_mut().unwrap())
     }
 
-    /// Returns the enclosed mock state and releases the exclusive lock.
-    #[allow(clippy::missing_panics_doc)] // unwrap() is safe by construction
-    pub fn into_inner(self) -> T {
+    fn into_inner(self) -> T {
         self.mock.lock().take().unwrap()
     }
 }

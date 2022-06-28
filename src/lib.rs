@@ -222,7 +222,7 @@ use once_cell::sync::OnceCell;
 
 use core::{
     cell::{Cell, RefCell},
-    ops,
+    fmt, ops,
 };
 
 #[cfg(feature = "shared")]
@@ -250,7 +250,7 @@ pub trait GetMock<'a, T> {
 /// Interface to set up mock state.
 pub trait SetMock<'a, T> {
     /// Exclusive guard for the mock. See [`Self::set()`] for more details.
-    type Guard: 'a;
+    type Guard: 'a + Guard<T>;
 
     /// Sets the mock state.
     ///
@@ -267,6 +267,12 @@ pub trait SetMock<'a, T> {
     ///
     /// [shared mocks]: crate::Shared
     fn set(&'a self, state: T) -> Self::Guard;
+}
+
+#[doc(hidden)]
+pub trait Guard<T> {
+    fn with<R>(&mut self, action: impl FnOnce(&mut T) -> R) -> R;
+    fn into_inner(self) -> T;
 }
 
 /// Interface to lock mock state changes without [setting](SetMock) the state.
@@ -309,10 +315,31 @@ where
     }
 }
 
+/// Wrapper that allows proxying exclusive accesses to the wrapped object. `Wrap<T>`
+/// is similar to `Into<T> + BorrowMut<T>`, but without the necessity to implement `Borrow<T>`
+/// (which would be unsound for the desired use cases), or deal with impossibility to
+/// blanket-implement `Into<T>`.
+pub trait Wrap<T>: From<T> {
+    /// Returns the wrapped value.
+    fn into_inner(self) -> T;
+    /// Returns an exclusive reference to the wrapped value.
+    fn as_mut(&mut self) -> &mut T;
+}
+
+impl<T> Wrap<T> for T {
+    fn into_inner(self) -> T {
+        self
+    }
+
+    fn as_mut(&mut self) -> &mut T {
+        self
+    }
+}
+
 /// State of a mock.
 pub trait Mock: Sized {
     /// FIXME
-    type Base: From<Self> + CheckDelegate;
+    type Base: Wrap<Self> + CheckDelegate;
 
     /// Wrapper around [`Self::Base`] allowing to share it across test code and the main program.
     #[doc(hidden)]
@@ -328,13 +355,15 @@ pub trait Mock: Sized {
     fn instance() -> &'static Static<Self::Shared>;
 
     /// FIXME
-    fn set(state: Self) -> <Self::Shared as SetMock<'static, Self::Base>>::Guard {
+    fn set(state: Self) -> MockGuard<Self> {
         let cell = Self::instance().cell.get_or_init(<Self::Shared>::default);
-        cell.set(state.into())
+        MockGuard {
+            inner: cell.set(state.into()),
+        }
     }
 
     /// FIXME
-    fn set_default() -> <Self::Shared as SetMock<'static, Self::Base>>::Guard
+    fn set_default() -> MockGuard<Self>
     where
         Self: Default,
     {
@@ -342,12 +371,55 @@ pub trait Mock: Sized {
     }
 
     /// FIXME
-    fn lock() -> <Self::Shared as LockMock<'static, Self::Base>>::EmptyGuard
+    fn lock() -> EmptyGuard<Self>
     where
         Self::Shared: LockMock<'static, Self::Base>,
     {
         let cell = Self::instance().cell.get_or_init(<Self::Shared>::default);
-        cell.lock()
+        EmptyGuard {
+            _inner: cell.lock(),
+        }
+    }
+}
+
+/// FIXME
+pub struct MockGuard<T: Mock> {
+    inner: <T::Shared as SetMock<'static, T::Base>>::Guard,
+}
+
+impl<T: Mock> fmt::Debug for MockGuard<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_struct("MockGuard").finish_non_exhaustive()
+    }
+}
+
+impl<T: Mock> MockGuard<T> {
+    /// Performs an action on the mock state without releasing the guard. This can be used
+    /// to adjust the mock state, check or take some parts of it (such as responses).
+    pub fn with<R>(&mut self, action: impl FnOnce(&mut T) -> R) -> R {
+        self.inner.with(|wrapped| action(wrapped.as_mut()))
+    }
+
+    /// Returns the enclosed mock state and releases the exclusive lock.
+    pub fn into_inner(self) -> T {
+        Guard::into_inner(self.inner).into_inner()
+    }
+}
+
+/// FIXME
+pub struct EmptyGuard<T: Mock>
+where
+    T::Shared: LockMock<'static, T::Base>,
+{
+    _inner: <T::Shared as LockMock<'static, T::Base>>::EmptyGuard,
+}
+
+impl<T: Mock> fmt::Debug for EmptyGuard<T>
+where
+    T::Shared: LockMock<'static, T::Base>,
+{
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_struct("EmptyGuard").finish_non_exhaustive()
     }
 }
 
@@ -376,6 +448,16 @@ impl<T> From<T> for Mut<T> {
             inner: RefCell::new(inner),
             switch: DelegateSwitch::default(),
         }
+    }
+}
+
+impl<T> Wrap<T> for Mut<T> {
+    fn into_inner(self) -> T {
+        self.inner.into_inner()
+    }
+
+    fn as_mut(&mut self) -> &mut T {
+        self.inner.get_mut()
     }
 }
 

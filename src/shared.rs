@@ -1,10 +1,14 @@
 //! Thread-safe implementation of `HandleMock`.
 
+use ouroboros::self_referencing;
 use parking_lot::{Mutex, MutexGuard, ReentrantMutex, ReentrantMutexGuard};
 
-use core::cell::RefCell;
+use core::{
+    cell::{Ref, RefCell},
+    ops,
+};
 
-use crate::{CallMock, Context, FallbackSwitch, GetMock, LockMock, SetMock};
+use crate::{GetMock, LockMock, SetMock};
 
 /// Wrapper around [`Mock`](crate::Mock) state that provides cross-thread synchronization.
 ///
@@ -98,7 +102,7 @@ impl<'a, T: 'static> GetMock<'a, T> for Shared<T> {
     fn get(&self) -> Option<SharedRef<'_, T>> {
         let guard = self.lock();
         if guard.borrow().is_some() {
-            Some(SharedRef { guard })
+            Some(SharedRef::from_guard(guard))
         } else {
             None
         }
@@ -128,17 +132,29 @@ impl<'a, T: 'static> LockMock<'a, T> for Shared<T> {
 }
 
 /// Shared reference to mock state.
-#[derive(Debug)]
-#[doc(hidden)] // only (indirectly) used in macros
+#[self_referencing]
 pub struct SharedRef<'a, T> {
-    // Invariant: the `Option` is always `Some(_)`
     guard: ReentrantMutexGuard<'a, RefCell<Option<T>>>,
+    #[borrows(guard)]
+    #[covariant]
+    state: Ref<'this, T>,
 }
 
-impl<T: 'static> CallMock<T> for SharedRef<'_, T> {
-    fn call_mock<R>(self, switch: &FallbackSwitch, action: impl FnOnce(Context<'_, T>) -> R) -> R {
-        let state = &*self.guard;
-        action(Context::new(state, switch))
+impl<T> ops::Deref for SharedRef<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.borrow_state()
+    }
+}
+
+impl<'a, T> SharedRef<'a, T> {
+    fn from_guard(guard: ReentrantMutexGuard<'a, RefCell<Option<T>>>) -> Self {
+        SharedRefBuilder {
+            guard,
+            state_builder: |guard| Ref::map(guard.borrow(), |option| option.as_ref().unwrap()),
+        }
+        .build()
     }
 }
 
@@ -150,7 +166,7 @@ pub struct SharedGuard<'a, T> {
     _guard: MutexGuard<'a, ()>,
 }
 
-impl<T> SharedGuard<'_, T> {
+impl<T: 'static> SharedGuard<'_, T> {
     /// Performs an action on the mock state without releasing the guard. This can be used
     /// to adjust the mock state, check or take some parts of it (such as responses).
     #[allow(clippy::missing_panics_doc)] // unwrap() is safe by construction
@@ -160,7 +176,7 @@ impl<T> SharedGuard<'_, T> {
         action(borrowed.as_mut().unwrap())
     }
 
-    /// Returns the enclosed mock state and lifts the exclusive lock.
+    /// Returns the enclosed mock state and releases the exclusive lock.
     #[allow(clippy::missing_panics_doc)] // unwrap() is safe by construction
     pub fn into_inner(self) -> T {
         self.mock.lock().take().unwrap()

@@ -146,20 +146,12 @@ impl FunctionWrapper {
         let mock_fn = &self.mock_fn;
 
         quote! {
-            std::thread_local! {
-                static __FALLBACK: mimicry::FallbackSwitch = mimicry::FallbackSwitch::default();
-            }
-
-            if !__FALLBACK.with(mimicry::FallbackSwitch::is_active) {
+            {
                 let instance = <#state as mimicry::Mock>::instance();
                 if let Some(mock_ref) = mimicry::GetMock::get(instance) {
-                    return __FALLBACK.with(|fallback| {
-                        mimicry::CallMock::call_mock(
-                            mock_ref,
-                            fallback,
-                            |cx| #state::#mock_fn(cx, #recv #(#args,)*),
-                        )
-                    });
+                    if !<#state as mimicry::CheckDelegate>::should_delegate(&*mock_ref) {
+                        return #state::#mock_fn(&*mock_ref, #recv #(#args,)*);
+                    }
                 }
             }
         }
@@ -354,20 +346,14 @@ mod tests {
 
         #[rustfmt::skip] // formatting removes the necessary trailing comma
         let expected: syn::Block = syn::parse_quote!({
-            std::thread_local! {
-                static __FALLBACK: mimicry::FallbackSwitch = mimicry::FallbackSwitch::default();
-            }
-
-            if !__FALLBACK.with(mimicry::FallbackSwitch::is_active) {
+            {
                 let instance = <TestMock as mimicry::Mock>::instance();
                 if let Some(mock_ref) = mimicry::GetMock::get(instance) {
-                    return __FALLBACK.with(|fallback| {
-                        mimicry::CallMock::call_mock(
-                            mock_ref,
-                            fallback,
-                            |cx| TestMock::test(cx, __arg0, __arg1,),
-                        )
-                    });
+                    if <TestMock as mimicry::Delegate>::delegate_switch(&*mock_ref)
+                        .map_or(false, mimicry::DelegateSwitch::should_delegate)
+                    {
+                        return TestMock::test(&*mock_ref, __arg0, __arg1,);
+                    }
                 }
             }
         });

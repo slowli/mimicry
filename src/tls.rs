@@ -1,8 +1,8 @@
 //! Thread-local implementation of `HandleMock`.
 
-use core::cell::{RefCell, RefMut};
+use core::cell::{Ref, RefCell, RefMut};
 
-use crate::{CallMock, Context, FallbackSwitch, GetMock, SetMock};
+use crate::{GetMock, SetMock};
 
 /// Thread-local mock state wrapper.
 ///
@@ -64,12 +64,13 @@ impl<T> Default for ThreadLocalInner<T> {
 }
 
 impl<'a, T: Send + 'static> GetMock<'a, T> for ThreadLocal<T> {
-    type Ref = ThreadLocalRef<'a, T>;
+    type Ref = Ref<'a, T>;
 
-    fn get(&'a self) -> Option<ThreadLocalRef<'_, T>> {
+    fn get(&'a self) -> Option<Ref<'a, T>> {
         let cell = self.tls.get_or_default();
-        if cell.inner.borrow().is_some() {
-            Some(ThreadLocalRef { guard: &cell.inner })
+        let borrow = cell.inner.borrow();
+        if borrow.is_some() {
+            Some(Ref::map(borrow, |option| option.as_ref().unwrap()))
         } else {
             None
         }
@@ -90,18 +91,6 @@ impl<'a, T: Send + 'static> SetMock<'a, T> for ThreadLocal<T> {
             mock: &cell.inner,
             _guard: guard,
         }
-    }
-}
-
-#[derive(Debug)]
-#[doc(hidden)] // only (indirectly) used in macros
-pub struct ThreadLocalRef<'a, T> {
-    guard: &'a RefCell<Option<T>>,
-}
-
-impl<T: 'static + Send> CallMock<T> for ThreadLocalRef<'_, T> {
-    fn call_mock<R>(self, switch: &FallbackSwitch, action: impl FnOnce(Context<'_, T>) -> R) -> R {
-        action(Context::new(self.guard, switch))
     }
 }
 

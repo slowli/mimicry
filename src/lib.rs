@@ -225,14 +225,11 @@ mod shared;
 mod tls;
 
 #[cfg(feature = "shared")]
-pub use crate::shared::{Shared, SharedGuard, SharedRef};
-pub use crate::tls::{ThreadLocal, ThreadLocalGuard, ThreadLocalRef};
+pub use crate::shared::{Shared, SharedGuard};
+pub use crate::tls::{ThreadLocal, ThreadLocalGuard};
 pub use mimicry_derive::{mock, Mock};
 
-use core::{
-    cell::{Cell, RefCell, RefMut},
-    ops,
-};
+use core::{cell::Cell, ops};
 
 /// Interface to get mock state.
 #[doc(hidden)] // only used in macros
@@ -241,7 +238,7 @@ pub trait GetMock<'a, T> {
     /// call the mock impls when appropriate (non-`Copy` / non-autoref'd args
     /// are consumed by the call, so we must be extra careful to only call the mock impl
     /// when we know it's there).
-    type Ref: CallMock<T> + 'a;
+    type Ref: ops::Deref<Target = T> + 'a;
 
     /// Returns a reference to the shared mock state, or `None` if the mock is not set.
     fn get(&'a self) -> Option<Self::Ref>;
@@ -288,11 +285,6 @@ pub trait LockMock<'a, T>: SetMock<'a, T> {
     ///
     /// [shared mocks]: crate::Shared
     fn lock(&'a self) -> Self::EmptyGuard;
-}
-
-#[doc(hidden)] // only used in macros
-pub trait CallMock<T> {
-    fn call_mock<R>(self, switch: &FallbackSwitch, action: impl FnOnce(Context<'_, T>) -> R) -> R;
 }
 
 /// Wrapper that allows creating `static`s with [`SetMock`] implementations.
@@ -347,7 +339,7 @@ where
 }
 
 /// State of a mock.
-pub trait Mock: Sized {
+pub trait Mock: CheckDelegate + Sized {
     /// Wrapper around this state allowing to share it across test code and the main program.
     type Shared: for<'a> GetMock<'a, Self> + for<'a> SetMock<'a, Self> + 'static + Send + Sync;
 
@@ -355,101 +347,78 @@ pub trait Mock: Sized {
     fn instance() -> &'static Static<Self::Shared>;
 }
 
-/// Context providing access to the mock state and fallback switches for mocked functions.
-#[derive(Debug)]
-pub struct Context<'a, T> {
-    state: &'a RefCell<Option<T>>, // `Option` is always `Some(_)`
-    fallback_switch: &'a FallbackSwitch,
+/// FIXME
+pub trait CheckDelegate {
+    /// FIXME
+    fn should_delegate(&self) -> bool {
+        false
+    }
 }
 
-impl<'a, T> Context<'a, T> {
-    fn new(state: &'a RefCell<Option<T>>, fallback_switch: &'a FallbackSwitch) -> Self {
-        Self {
-            state,
-            fallback_switch,
-        }
-    }
+/// FIXME
+pub trait Delegate {
+    /// FIXME
+    fn delegate_switch(&self) -> &DelegateSwitch;
 
-    /// Re-borrows this context for a shorter duration.
-    pub fn borrow(&mut self) -> Context<'_, T> {
-        Context {
-            state: self.state,
-            fallback_switch: self.fallback_switch,
-        }
-    }
-
-    /// Returns an exclusive reference to the mock state.
-    ///
-    /// Beware that while the reference is alive, further calls to functions in the same mock
-    /// (including indirect ones, e.g., performed from the tested program code)
-    /// will not be able to retrieve the state; this will result
-    /// in a panic. To deal with this, you can create short lived state refs a la
-    /// `mock.state().do_something()`, or enclose the reference into an additional scope.
-    ///
-    /// # Panics
-    ///
-    /// Panics if a reference to the same mock state is alive, as described above.
-    pub fn state(&mut self) -> impl ops::DerefMut<Target = T> + '_ {
-        RefMut::map(self.state.borrow_mut(), |state| state.as_mut().unwrap())
-    }
-
-    /// Runs the provided closure with all calls to the mocked function / method being
-    /// directed to "real" implementation.
-    pub fn fallback<R>(&mut self, action: impl FnOnce() -> R) -> R {
-        self.fallback_switch.0.set(FallbackState::Fallback);
-        let _guard = FallbackGuard {
-            switch: self.fallback_switch,
-        };
+    /// FIXME
+    fn call_real<R>(&self, action: impl FnOnce() -> R) -> R {
+        let switch = <Self as Delegate>::delegate_switch(self);
+        switch.0.set(DelegateMode::RealImpl);
+        let _guard = DelegateGuard { switch };
         action()
     }
 
-    /// Runs the provided closure with the *first* call to the mocked function / method being
-    /// directed to "real" implementation. Further calls will be directed to the mock.
-    pub fn fallback_once<R>(&mut self, action: impl FnOnce() -> R) -> R {
-        self.fallback_switch.0.set(FallbackState::FallbackOnce);
-        let _guard = FallbackGuard {
-            switch: self.fallback_switch,
-        };
+    /// FIXME
+    fn call_real_once<R>(&self, action: impl FnOnce() -> R) -> R {
+        let switch = <Self as Delegate>::delegate_switch(self);
+        switch.0.set(DelegateMode::RealImplOnce);
+        let _guard = DelegateGuard { switch };
         action()
+    }
+}
+
+impl<T: Delegate> CheckDelegate for T {
+    fn should_delegate(&self) -> bool {
+        self.delegate_switch().should_delegate()
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum FallbackState {
+enum DelegateMode {
     Inactive,
-    Fallback,
-    FallbackOnce,
+    RealImpl,
+    RealImplOnce,
 }
 
-impl Default for FallbackState {
+impl Default for DelegateMode {
     fn default() -> Self {
         Self::Inactive
     }
 }
 
 /// Switch to (de)activate fallback implementations of mocked functions.
-#[doc(hidden)]
 #[derive(Debug, Default)]
-pub struct FallbackSwitch(Cell<FallbackState>);
+pub struct DelegateSwitch(Cell<DelegateMode>);
 
-impl FallbackSwitch {
-    pub fn is_active(&self) -> bool {
-        let state = self.0.get();
-        if state == FallbackState::FallbackOnce {
-            self.0.set(FallbackState::Inactive);
+#[doc(hidden)]
+impl DelegateSwitch {
+    pub fn should_delegate(&self) -> bool {
+        let mode = self.0.get();
+        if mode == DelegateMode::RealImplOnce {
+            self.0.set(DelegateMode::Inactive);
         }
-        state != FallbackState::Inactive
+        mode != DelegateMode::Inactive
     }
 }
 
 #[derive(Debug)]
-struct FallbackGuard<'a> {
-    switch: &'a FallbackSwitch,
+struct DelegateGuard<'a> {
+    switch: &'a DelegateSwitch,
 }
 
-impl Drop for FallbackGuard<'_> {
+impl Drop for DelegateGuard<'_> {
     fn drop(&mut self) {
-        self.switch.0.set(FallbackState::Inactive);
+        self.switch.0.set(DelegateMode::Inactive);
     }
 }
 

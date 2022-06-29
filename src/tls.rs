@@ -1,4 +1,4 @@
-//! Thread-local implementation of `HandleMock`.
+//! Thread-local mock state wrapper.
 
 use core::cell::{Ref, RefCell, RefMut};
 

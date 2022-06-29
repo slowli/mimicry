@@ -53,16 +53,16 @@
 //! - Mocking functions can have wider argument types than required from the signature of
 //!   function(s) being mocked. For example, if the mocking function doesn't use some args,
 //!   they can be just replaced with unconstrained type params.
-//! - Very limited built-in matching / verifying (see [`Answers`]). With the chosen approach,
-//!   it is frequently easier and more transparent to just use `match` statements.
-//!   As a downside, if matching logic needs to be customized across tests, it's (mostly)
-//!   up to the test writer.
 //!
 //! ## Downsides
 //!
 //! - You still cannot mock types from other crates.
 //! - Even if mocking logic does not use certain args, they need to be properly constructed,
 //!   which, depending on the case, may defy the reasons behind using mocks.
+//! - Very limited built-in matching / verifying (see [`Answers`]). With the chosen approach,
+//!   it is frequently easier and more transparent to just use `match` statements.
+//!   As a downside, if matching logic needs to be customized across tests, it's (mostly)
+//!   up to the test writer.
 //!
 //! # Crate features
 //!
@@ -305,6 +305,9 @@ where
 }
 
 /// State of a mock.
+///
+/// This trait should be implemented via the corresponding derive macro; parts of it are
+/// non-documented and subject to change.
 pub trait Mock: Sized {
     #[doc(hidden)]
     type Base: Wrap<Self> + CheckRealCall;
@@ -323,6 +326,7 @@ pub trait Mock: Sized {
     fn instance() -> &'static Static<Self::Shared>;
 
     /// Sets the mock state and returns an exclusive guard to the shared state.
+    #[must_use = "mock is only set until the returned `MockGuard` is dropped"]
     fn set_as_mock(self) -> MockGuard<Self> {
         let cell = Self::instance().cell.get_or_init(<Self::Shared>::default);
         MockGuard {

@@ -95,15 +95,16 @@ See crate docs for more details and examples of usage.
 - Mocking functions can have wider argument types than required from the signature of
   function(s) being mocked. For example, if the mocking function doesn't use some args,
   they can be just replaced with unconstrained type params.
-- No matching via predicates etc. With the chosen approach, it is easier and more transparent
-  to just use `match` statements. As a downside, if matching logic needs to be customized
-  across tests, it's up to the test writer.
 
 ### Downsides
 
 - You still cannot mock types from other crates.
 - Even if mocking logic does not use certain args, they need to be properly constructed,
   which, depending on the case, may defy the reasons behind using mocks.
+- Very limited built-in matching / verifying. With the chosen approach,
+  it is frequently easier and more transparent to just use `match` statements.
+  As a downside, if matching logic needs to be customized across tests, it's (mostly)
+  up to the test writer.
 
 ## Alternatives
 

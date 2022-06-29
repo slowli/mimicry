@@ -1,4 +1,4 @@
-//! Thread-safe implementation of `HandleMock`.
+//! Thread-safe mock state wrapper.
 
 use ouroboros::self_referencing;
 use parking_lot::{Mutex, MutexGuard, ReentrantMutex, ReentrantMutexGuard};

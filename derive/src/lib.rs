@@ -1,6 +1,6 @@
 //! Procedural macros for [`mimicry`].
 //!
-//! See macro docs for examples of usage.
+//! See [`mimicry`] docs for examples of usage.
 //!
 //! [`mimicry`]: https://docs.rs/mimicry/
 
@@ -44,6 +44,7 @@ use proc_macro::TokenStream;
 ///
 /// [`Shared`]: https://docs.rs/mimicry/latest/mimicry/struct.Shared.html
 /// [`ThreadLocal`]: https://docs.rs/mimicry/latest/mimicry/struct.ThreadLocal.html
+/// [`Mut`]: https://docs.rs/mimicry/latest/mimicry/struct.Mut.html
 #[proc_macro_derive(Mock, attributes(mock))]
 pub fn mock_derive(input: TokenStream) -> TokenStream {
     mock_impl::impl_mock(input)
@@ -106,7 +107,12 @@ pub fn call_real_derive(input: TokenStream) -> TokenStream {
 /// In this case, it will apply to all methods in the block. If necessary, mocking options can
 /// be overridden for separate methods in the block by adding a `mock` attribute on them.
 ///
-/// [path]: syn::Path
+/// # Examples
+///
+/// See [`mimicry`] docs for examples of usage.
+///
+/// [path]: https://docs.rs/syn/latest/syn/struct.Path.html
+/// [`mimicry`]: https://docs.rs/mimicry/
 #[proc_macro_attribute]
 pub fn mock(attr: TokenStream, item: TokenStream) -> TokenStream {
     function::wrap(attr, item)

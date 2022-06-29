@@ -49,6 +49,10 @@ impl FunctionWrapper {
             let message = "const functions are not supported";
             return Err(darling::Error::custom(message).with_span(const_token));
         }
+        if let Some(async_token) = &signature.asyncness {
+            let message = "async functions are not yet supported";
+            return Err(darling::Error::custom(message).with_span(async_token));
+        }
         Ok(())
     }
 
@@ -136,7 +140,7 @@ impl FunctionWrapper {
         }
     }
 
-    fn fallback_logic(&self) -> impl ToTokens {
+    fn routing_logic(&self) -> impl ToTokens {
         let recv = self
             .receiver
             .as_ref()
@@ -160,7 +164,7 @@ impl FunctionWrapper {
 
 impl ToTokens for FunctionWrapper {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let wrapper = self.wrap(self.fallback_logic());
+        let wrapper = self.wrap(self.routing_logic());
         tokens.extend(quote!(#wrapper));
     }
 }
@@ -223,7 +227,8 @@ pub(crate) fn wrap(attr: TokenStream, item: TokenStream) -> TokenStream {
             ImplWrapper::new(attrs, impl_block).map(|wrapper| quote!(#wrapper))
         }
         Ok(item) => {
-            let message = "Item is not supported; use `#[mock] on functions";
+            let message = "Item is not supported; use `#[mock] on functions, \
+                methods, or impl blocks";
             Err(darling::Error::custom(message).with_span(&item))
         }
         Err(err) => return err.into_compile_error().into(),
@@ -332,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn defining_fallback_flag() {
+    fn defining_routing_logic() {
         let attrs = FunctionAttrs {
             using: syn::parse_quote!(TestMock),
             rename: None,
@@ -341,8 +346,8 @@ mod tests {
             fn test(x: u8, y: u8) -> u16 { x + y }
         };
         let wrapper = FunctionWrapper::new(attrs, function).unwrap();
-        let fallback_logic = wrapper.fallback_logic();
-        let fallback_flag: syn::Block = syn::parse_quote!({ #fallback_logic });
+        let routing_logic = wrapper.routing_logic();
+        let routing_logic: syn::Block = syn::parse_quote!({ #routing_logic });
 
         #[rustfmt::skip] // formatting removes the necessary trailing comma
         let expected: syn::Block = syn::parse_quote!({
@@ -355,7 +360,7 @@ mod tests {
                 }
             }
         });
-        assert_eq!(fallback_flag, expected, "{}", quote!(#fallback_flag));
+        assert_eq!(routing_logic, expected, "{}", quote!(#routing_logic));
     }
 
     #[test]

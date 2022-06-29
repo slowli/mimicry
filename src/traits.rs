@@ -75,7 +75,7 @@ pub trait CheckRealCall {
     }
 }
 
-/// Controls delegation to real impls. The methods in this trait can be used
+/// Controls delegation to real impls. The provided `call_*` methods in this trait can be used
 /// for partial mocking and spying.
 pub trait CallReal {
     /// Returns a reference to the call switch.

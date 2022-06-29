@@ -71,6 +71,8 @@ let recovered = guard.into_inner();
 assert_eq!(recovered.called_times, 3);
 ```
 
+See crate docs for more details and examples of usage.
+
 ## Features
 
 - Can mock functions / methods with a wide variety of signatures, including generic functions

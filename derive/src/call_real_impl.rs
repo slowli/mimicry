@@ -3,7 +3,7 @@
 use darling::{FromDeriveInput, FromMeta};
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{Data, Fields, Field, DataStruct, DeriveInput, Generics, Ident, Index, Type, TypePath};
+use syn::{Data, DataStruct, DeriveInput, Field, Fields, Generics, Ident, Index, Type, TypePath};
 
 use crate::utils::find_meta_attrs;
 
@@ -15,7 +15,10 @@ enum FieldIdent {
 
 impl FieldIdent {
     fn new(idx: usize, field: &Field) -> Self {
-        field.ident.clone().map_or_else(|| Self::Unnamed(idx.into()), Self::Named)
+        field
+            .ident
+            .clone()
+            .map_or_else(|| Self::Unnamed(idx.into()), Self::Named)
     }
 }
 

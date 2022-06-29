@@ -9,6 +9,8 @@ use std::{
 
 use mimicry::{mock, CallReal, Mock, Mut, RealCallSwitch};
 
+// TODO: test early returns, arg destructuring
+
 #[test]
 fn mock_basics() {
     #[mock(using = "SearchMock", rename = "mock_{}")]

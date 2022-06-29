@@ -2,7 +2,7 @@
 //!
 //! Mocking in Rust is somewhat hard compared to object-oriented languages. Since there
 //! is no implicit / all-encompassing class hierarchy, [Liskov substitution principle]
-//! does not apply, thus making it generally impossible to replace an object with its mock.
+//! does not apply, making it generally impossible to replace an object with its mock.
 //! A switch is only possible if the object consumer explicitly opts in via
 //! parametric polymorphism or dynamic dispatch.
 //!
@@ -17,6 +17,26 @@
 //!
 //! [Liskov substitution principle]: https://en.wikipedia.org/wiki/Liskov_substitution_principle
 //! [remote derive]: https://serde.rs/remote-derive.html
+//!
+//! # Overview
+//!
+//! 1. Define the state to hold data necessary for mocking / spying and derive
+//!   [`Mock`] for it. Requirements to the state are quite lax; it should be
+//!  `'static` and `Send`.
+//! 2. Place [`mock`] attrs referencing the state on the relevant functions, methods
+//!   and/or impl blocks.
+//! 3. Define mock logic as inherent methods of the mock state type. Such methods will be called
+//!   with the same args as the original functions + additional first arg for the mock state
+//!   reference. In the simplest case,
+//!   each mocked function / method gets its own method with the same name as the original,
+//!   but this can be customized.
+//! 4. If the state needs to be mutated in mock logic, add a `#[mock(mut)]` attr on the state.
+//!   In this case, the mock method will receive `&`[`Mut`]`<Self>` wrapper as the first arg
+//!   instead of `&self`.
+//! 5. If the mock logic needs to be shared across threads, add a `#[mock(shared)]` attr
+//!   on the state. (By default, mocks are thread-local.)
+//! 6. Set the mock state in tests using [`Mock::set_as_mock()`]. Inspect the state during tests
+//!   using [`MockGuard::with()`] and after tests using [`MockGuard::into_inner()`].
 //!
 //! # Features and limitations
 //!
@@ -33,9 +53,10 @@
 //! - Mocking functions can have wider argument types than required from the signature of
 //!   function(s) being mocked. For example, if the mocking function doesn't use some args,
 //!   they can be just replaced with unconstrained type params.
-//! - No matching via predicates etc. With the chosen approach, it is easier and more transparent
-//!   to just use `match` statements. As a downside, if matching logic needs to be customized
-//!   across tests, it's up to the test writer.
+//! - Very limited built-in matching / verifying (see [`Answers`]). With the chosen approach,
+//!   it is frequently easier and more transparent to just use `match` statements.
+//!   As a downside, if matching logic needs to be customized across tests, it's (mostly)
+//!   up to the test writer.
 //!
 //! ## Downsides
 //!
@@ -49,7 +70,7 @@
 //!
 //! *(Off by default)*
 //!
-//! Enables [mocks](Shared) that can be used across multiple threads.
+//! Enables mocks that [can be used](Shared) across multiple threads.
 //!
 //! # Examples
 //!
@@ -111,7 +132,7 @@
 //!
 //! Mock functions only get a shared reference to the mock state; this is because
 //! the same state can be accessed from multiple places during recursive calls.
-//! To easily mutate the state during tests, consider using the [`Mut`](crate::Mut)
+//! To easily mutate the state during tests, consider using the [`Mut`]
 //! wrapper.
 //!
 //! ## On impl blocks
@@ -239,6 +260,7 @@ use once_cell::sync::OnceCell;
 
 use core::{cell::RefCell, fmt, ops};
 
+mod answers;
 #[cfg(feature = "shared")]
 mod shared;
 mod tls;
@@ -247,6 +269,7 @@ mod traits;
 #[cfg(feature = "shared")]
 pub use crate::shared::Shared;
 pub use crate::{
+    answers::Answers,
     tls::ThreadLocal,
     traits::{CallReal, CheckRealCall, GetMock, RealCallSwitch},
 };
@@ -372,7 +395,8 @@ impl<T: Mock> fmt::Debug for MockGuard<T> {
 
 impl<T: Mock> MockGuard<T> {
     /// Performs an action on the mock state without releasing the guard. This can be used
-    /// to adjust the mock state, check or take some parts of it (such as responses).
+    /// to adjust the mock state, check or take some parts of it (such as collected args
+    /// or responses).
     pub fn with<R>(&mut self, action: impl FnOnce(&mut T) -> R) -> R {
         self.inner.with(|wrapped| action(wrapped.as_mut()))
     }
@@ -425,7 +449,7 @@ where
 ///     }
 /// }
 ///
-/// let mut guard = CounterMock::default().set_as_mock();
+/// let guard = CounterMock::default().set_as_mock();
 /// assert_eq!(answer(), 1);
 /// assert_eq!(answer(), 2);
 /// assert_eq!(answer(), 3);

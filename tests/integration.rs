@@ -9,8 +9,6 @@ use std::{
 
 use mimicry::{mock, CallReal, Mock, Mut, RealCallSwitch};
 
-// TODO: test early returns, arg destructuring
-
 #[test]
 fn mock_basics() {
     #[mock(using = "SearchMock", rename = "mock_{}")]
@@ -88,6 +86,44 @@ fn mock_with_lifetimes() {
     let mut bytes = *b"test";
     assert_eq!(tail(&mut bytes), Some(&0));
     assert_eq!(bytes, *b"test");
+}
+
+#[test]
+fn arg_destructuring_and_early_returns() {
+    #[derive(Debug, PartialEq)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+
+    #[mock(using = "DestructureMock")]
+    fn destructure([head, ..]: &[i32; 4], Point { x, y }: Point) -> Result<Point, &'static str> {
+        if *head < 0 {
+            return Err("negative head");
+        }
+        Ok(Point {
+            x: x + head,
+            y: y + head,
+        })
+    }
+
+    #[derive(Default, Mock)]
+    #[cfg_attr(feature = "shared", mock(shared))]
+    struct DestructureMock;
+
+    impl mimicry::CheckRealCall for DestructureMock {}
+
+    impl DestructureMock {
+        fn destructure(&self, _: &[i32], point: Point) -> Result<Point, &'static str> {
+            Ok(point)
+        }
+    }
+
+    let _guard = DestructureMock::default().set_as_mock();
+    assert_eq!(
+        destructure(&[-1; 4], Point { x: 3, y: 4 }).unwrap(),
+        Point { x: 3, y: 4 }
+    );
 }
 
 #[test]

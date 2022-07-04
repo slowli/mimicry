@@ -1,0 +1,246 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Mocking / spying library based on lightweight function proxies."><meta name="keywords" content="rust, rustlang, rust-lang, mimicry"><title>mimicry - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../dark.css" disabled><link rel="stylesheet" type="text/css" href="../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../storage.js"></script><script src="../crates.js"></script><script defer src="../main.js"></script>
+    <noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../favicon.svg"></head><body class="rustdoc mod crate"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../mimicry/index.html"><div class="logo-container"><img class="rust-logo" src="../rust-logo.svg" alt="logo"></div>
+        </a><h2 class="location"></h2>
+    </nav>
+    <nav class="sidebar"><a class="sidebar-logo" href="../mimicry/index.html"><div class="logo-container"><img class="rust-logo" src="../rust-logo.svg" alt="logo"></div>
+        </a><h2 class="location"><a href="#">Crate mimicry</a></h2><div class="sidebar-elems"><div class="block"><ul><li class="version">Version 0.1.0</li><li><a id="all-types" href="all.html">All Items</a></li></div></ul><section><div class="block"><ul><li><a href="#structs">Structs</a></li><li><a href="#traits">Traits</a></li><li><a href="#attributes">Attribute Macros</a></li><li><a href="#derives">Derive Macros</a></li></ul></div></section><div id="sidebar-vars" data-name="mimicry" data-ty="mod" data-relpath=""></div><script defer src="sidebar-items.js"></script></div></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../mimicry/index.html"><img class="rust-logo" src="../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><button type="button" id="help-button" title="help">?</button><div id="settings-menu" tabindex="-1">
+                                <a href="../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../wheel.svg"></a></div>
+                        </div></form></nav></div><section id="main-content" class="content"><div class="main-heading">
+    <h1 class="fqn"><span class="in-band">Crate <a class="mod" href="#">mimicry</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../clipboard.svg" width="19" height="18" alt="Copy item path"></button></span></h1><span class="out-of-band"><a class="srclink" href="../src/mimicry/lib.rs.html#1-511">source</a> · <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class="inner">&#x2212;</span>]</a></span></div><details class="rustdoc-toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Mocking / spying library based on lightweight function proxies.</p>
+<p>Mocking in Rust is somewhat hard compared to object-oriented languages. Since there
+is no implicit / all-encompassing class hierarchy, <a href="https://en.wikipedia.org/wiki/Liskov_substitution_principle">Liskov substitution principle</a>
+does not apply, making it generally impossible to replace an object with its mock.
+A switch is only possible if the object consumer explicitly opts in via
+parametric polymorphism or dynamic dispatch.</p>
+<p>What do? Instead of trying to emulate mocking approaches from the object-oriented world,
+this crate opts in for another approach, somewhat similar to <a href="https://serde.rs/remote-derive.html">remote derive</a> from <code>serde</code>.
+Mocking is performed on function / method level, with each function conditionally proxied
+to a mock that has access to function args and can do whatever: call the “real” function
+(e.g., to spy on responses), maybe with different args and/or after mutating args;
+substitute with a mock response, etc. Naturally, mock logic
+can be stateful (e.g., determine a response from the predefined list; record responses
+for spied functions etc.)</p>
+<h2 id="overview"><a href="#overview">Overview</a></h2>
+<ol>
+<li>Define the state to hold data necessary for mocking / spying and derive
+<a href="trait.Mock.html" title="Mock"><code>Mock</code></a> for it. Requirements to the state are quite lax; it should be
+<code>'static</code> and <code>Send</code>.</li>
+<li>Place <a href="attr.mock.html" title="mock"><code>mock</code></a> attrs referencing the state on the relevant functions, methods
+and/or impl blocks.</li>
+<li>Define mock logic as inherent methods of the mock state type. Such methods will be called
+with the same args as the original functions + additional first arg for the mock state
+reference. In the simplest case,
+each mocked function / method gets its own method with the same name as the original,
+but this can be customized.</li>
+<li>If the state needs to be mutated in mock logic, add a <code>#[mock(mut)]</code> attr on the state.
+In this case, the mock method will receive <code>&amp;</code><a href="struct.Mut.html" title="Mut"><code>Mut</code></a><code>&lt;Self&gt;</code> wrapper as the first arg
+instead of <code>&amp;self</code>.</li>
+<li>If the mock logic needs to be shared across threads, add a <code>#[mock(shared)]</code> attr
+on the state. (By default, mocks are thread-local.)</li>
+<li>Set the mock state in tests using <a href="trait.Mock.html#method.set_as_mock" title="Mock::set_as_mock()"><code>Mock::set_as_mock()</code></a>. Inspect the state during tests
+using <a href="struct.MockGuard.html#method.with" title="MockGuard::with()"><code>MockGuard::with()</code></a> and after tests using <a href="struct.MockGuard.html#method.into_inner" title="MockGuard::into_inner()"><code>MockGuard::into_inner()</code></a>.</li>
+</ol>
+<h2 id="features-and-limitations"><a href="#features-and-limitations">Features and limitations</a></h2>
+<ul>
+<li>Can mock functions / methods with a wide variety of signatures, including generic functions
+(with not necessarily <code>'static</code> type params), functions returning non-<code>'static</code> responses
+and responses with dependent lifetimes, such as in <code>fn(&amp;str) -&gt; &amp;str</code>, functions with
+<code>impl Trait</code> args etc.</li>
+<li>Can mock methods in <code>impl</code> blocks, including trait implementations.</li>
+<li>Single mocking function can mock multiple functions, provided that they have compatible
+signatures.</li>
+<li>Whether mock state is shared across functions / methods, is completely up to the test writer.
+Functions for the same receiver type / in the same <code>impl</code> block may have different
+mock states.</li>
+<li>Mocking functions can have wider argument types than required from the signature of
+function(s) being mocked. For example, if the mocking function doesn’t use some args,
+they can be just replaced with unconstrained type params.</li>
+</ul>
+<h3 id="downsides"><a href="#downsides">Downsides</a></h3>
+<ul>
+<li>You still cannot mock types from other crates.</li>
+<li>Even if mocking logic does not use certain args, they need to be properly constructed,
+which, depending on the case, may defy the reasons behind using mocks.</li>
+<li>Very limited built-in matching / verifying (see <a href="struct.Answers.html" title="Answers"><code>Answers</code></a>). With the chosen approach,
+it is frequently easier and more transparent to just use <code>match</code> statements.
+As a downside, if matching logic needs to be customized across tests, it’s (mostly)
+up to the test writer.</li>
+</ul>
+<h2 id="crate-features"><a href="#crate-features">Crate features</a></h2><h3 id="shared"><a href="#shared"><code>shared</code></a></h3>
+<p><em>(Off by default)</em></p>
+<p>Enables mocks that <a href="struct.Shared.html">can be used</a> across multiple threads.</p>
+<h2 id="examples"><a href="#examples">Examples</a></h2><h3 id="basics"><a href="#basics">Basics</a></h3>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use</span> <span class="ident">mimicry</span>::{<span class="ident">mock</span>, <span class="ident">CallReal</span>, <span class="ident">RealCallSwitch</span>, <span class="ident">Mock</span>};
+
+<span class="comment">// Mock target: a standalone function.</span>
+<span class="attribute">#[<span class="ident">cfg_attr</span>(<span class="ident">test</span>, <span class="ident">mock</span>(<span class="ident">using</span> <span class="op">=</span> <span class="string">&quot;SearchMock&quot;</span>))]</span>
+<span class="kw">fn</span> <span class="ident">search</span>(<span class="ident">haystack</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>, <span class="ident">needle</span>: <span class="ident">char</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
+    <span class="ident">haystack</span>.<span class="ident">chars</span>().<span class="ident">position</span>(<span class="op">|</span><span class="ident">ch</span><span class="op">|</span> <span class="ident">ch</span> <span class="op">==</span> <span class="ident">needle</span>)
+}
+
+<span class="comment">// Mock state. In this case, we use it to record responses.</span>
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Default</span>, <span class="ident">Mock</span>, <span class="ident">CallReal</span>)]</span>
+<span class="kw">struct</span> <span class="ident">SearchMock</span> {
+    <span class="ident">called_times</span>: <span class="ident">Cell</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span>,
+    <span class="ident">switch</span>: <span class="ident">RealCallSwitch</span>,
+    <span class="comment">// ^ Stores the real / mocked function switch, thus allowing</span>
+    <span class="comment">// to call `Delegate` trait methods.</span>
+}
+
+<span class="kw">impl</span> <span class="ident">SearchMock</span> {
+    <span class="comment">// Mock implementation: an inherent method of the mock state</span>
+    <span class="comment">// specified in the `#[mock()]` macro on the mocked function.</span>
+    <span class="comment">// The mock impl receives same args as the mocked function</span>
+    <span class="comment">// with the additional context parameter that allows</span>
+    <span class="comment">// accessing the mock state and controlling mock / real function switches.</span>
+    <span class="kw">fn</span> <span class="ident">search</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">haystack</span>: <span class="kw-2">&amp;</span><span class="ident">str</span>,
+        <span class="ident">needle</span>: <span class="ident">char</span>,
+    ) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">usize</span><span class="op">&gt;</span> {
+        <span class="self">self</span>.<span class="ident">called_times</span>.<span class="ident">set</span>(<span class="self">self</span>.<span class="ident">called_times</span>.<span class="ident">get</span>() <span class="op">+</span> <span class="number">1</span>);
+        <span class="kw">match</span> <span class="ident">haystack</span> {
+            <span class="string">&quot;test&quot;</span> =&gt; <span class="prelude-val">Some</span>(<span class="number">42</span>),
+            <span class="ident">short</span> <span class="kw">if</span> <span class="ident">short</span>.<span class="ident">len</span>() <span class="op">&lt;</span><span class="op">=</span> <span class="number">2</span> =&gt; <span class="prelude-val">None</span>,
+            <span class="kw">_</span> =&gt; {
+                <span class="kw">let</span> <span class="ident">new_needle</span> <span class="op">=</span> <span class="kw">if</span> <span class="ident">needle</span> <span class="op">==</span> <span class="string">&#39;?&#39;</span> { <span class="string">&#39;e&#39;</span> } <span class="kw">else</span> { <span class="ident">needle</span> };
+                <span class="self">self</span>.<span class="ident">call_real</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">search</span>(<span class="ident">haystack</span>, <span class="ident">new_needle</span>))
+            }
+        }
+    }
+}
+
+<span class="comment">// Test code.</span>
+<span class="kw">let</span> <span class="ident">guard</span> <span class="op">=</span> <span class="ident">SearchMock::default</span>().<span class="ident">set_as_mock</span>();
+<span class="macro">assert_eq!</span>(<span class="ident">search</span>(<span class="string">&quot;test&quot;</span>, <span class="string">&#39;?&#39;</span>), <span class="prelude-val">Some</span>(<span class="number">42</span>));
+<span class="macro">assert_eq!</span>(<span class="ident">search</span>(<span class="string">&quot;?!&quot;</span>, <span class="string">&#39;?&#39;</span>), <span class="prelude-val">None</span>);
+<span class="macro">assert_eq!</span>(<span class="ident">search</span>(<span class="string">&quot;needle?&quot;</span>, <span class="string">&#39;?&#39;</span>), <span class="prelude-val">Some</span>(<span class="number">1</span>));
+<span class="macro">assert_eq!</span>(<span class="ident">search</span>(<span class="string">&quot;needle?&quot;</span>, <span class="string">&#39;d&#39;</span>), <span class="prelude-val">Some</span>(<span class="number">3</span>));
+<span class="kw">let</span> <span class="ident">recovered</span> <span class="op">=</span> <span class="ident">guard</span>.<span class="ident">into_inner</span>();
+<span class="macro">assert_eq!</span>(<span class="ident">recovered</span>.<span class="ident">called_times</span>.<span class="ident">into_inner</span>(), <span class="number">4</span>);</code></pre></div>
+<p>Mock functions only get a shared reference to the mock state; this is because
+the same state can be accessed from multiple places during recursive calls.
+To easily mutate the state during tests, consider using the <a href="struct.Mut.html" title="Mut"><code>Mut</code></a>
+wrapper.</p>
+<h3 id="on-impl-blocks"><a href="#on-impl-blocks">On impl blocks</a></h3>
+<p>The <code>mock</code> attribute can be placed on impl blocks (including trait implementations)
+to apply a mock to all methods in the block:</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">struct</span> <span class="ident">Tested</span>(<span class="ident">String</span>);
+
+<span class="attribute">#[<span class="ident">mock</span>(<span class="ident">using</span> <span class="op">=</span> <span class="string">&quot;TestMock&quot;</span>)]</span>
+<span class="kw">impl</span> <span class="ident">Tested</span> {
+    <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="ident">usize</span> { <span class="self">self</span>.<span class="number">0</span>.<span class="ident">len</span>() }
+
+    <span class="kw">fn</span> <span class="ident">push</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>, <span class="ident">s</span>: <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span>) -&gt; <span class="kw-2">&amp;mut</span> <span class="self">Self</span> {
+        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">push_str</span>(<span class="ident">s</span>.<span class="ident">as_ref</span>());
+        <span class="self">self</span>
+    }
+}
+
+<span class="attribute">#[<span class="ident">mock</span>(<span class="ident">using</span> <span class="op">=</span> <span class="string">&quot;TestMock&quot;</span>, <span class="ident">rename</span> <span class="op">=</span> <span class="string">&quot;impl_{}&quot;</span>)]</span>
+<span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">Tested</span> {
+    <span class="kw">fn</span> <span class="ident">as_ref</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">str</span> {
+        <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="number">0</span>
+    }
+}
+
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Mock</span>)]</span>
+<span class="kw">struct</span> <span class="ident">TestMock</span> { <span class="comment">/* ... */</span> }
+<span class="comment">// Since we don&#39;t use partial mocking / spying, we indicate</span>
+<span class="comment">// this with an empty `CheckRealCall` impl.</span>
+<span class="kw">impl</span> <span class="ident">CheckRealCall</span> <span class="kw">for</span> <span class="ident">TestMock</span> {}
+
+<span class="kw">impl</span> <span class="ident">TestMock</span> {
+    <span class="kw">fn</span> <span class="ident">len</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">recv</span>: <span class="kw-2">&amp;</span><span class="ident">Tested</span>) -&gt; <span class="ident">usize</span> {
+        <span class="comment">// ...</span>
+    }
+
+    <span class="kw">fn</span> <span class="ident">push</span><span class="op">&lt;</span><span class="lifetime">&#39;s</span><span class="op">&gt;</span>(
+        <span class="kw-2">&amp;</span><span class="self">self</span>,
+        <span class="ident">recv</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;s</span> <span class="kw-2">mut</span> <span class="ident">Tested</span>,
+        <span class="ident">s</span>: <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span>,
+    ) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;s</span> <span class="kw-2">mut</span> <span class="ident">Tested</span> {
+        <span class="comment">// ...</span>
+    }
+
+    <span class="kw">fn</span> <span class="ident">impl_as_ref</span><span class="op">&lt;</span><span class="lifetime">&#39;s</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">recv</span>: <span class="kw-2">&amp;</span><span class="lifetime">&#39;s</span> <span class="ident">Tested</span>) -&gt; <span class="kw-2">&amp;</span><span class="lifetime">&#39;s</span> <span class="ident">str</span> {
+        <span class="comment">// ...</span>
+    }
+}</code></pre></div>
+<h3 id="what-cant-be-mocked"><a href="#what-cant-be-mocked">What can(’t) be mocked?</a></h3>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">struct</span> <span class="ident">Test</span>;
+<span class="kw">impl</span> <span class="ident">Test</span> {
+    <span class="attribute">#[<span class="ident">mock</span>(<span class="ident">using</span> <span class="op">=</span> <span class="string">&quot;CountingMock::count&quot;</span>)]</span>
+    <span class="kw">fn</span> <span class="ident">do_something</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) {}
+
+    <span class="attribute">#[<span class="ident">mock</span>(<span class="ident">using</span> <span class="op">=</span> <span class="string">&quot;CountingMock::count&quot;</span>)]</span>
+    <span class="kw">fn</span> <span class="ident">lifetimes</span>(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">str</span> {
+        <span class="string">&quot;what?&quot;</span>
+    }
+
+    <span class="attribute">#[<span class="ident">mock</span>(<span class="ident">using</span> <span class="op">=</span> <span class="string">&quot;CountingMock::count&quot;</span>)]</span>
+    <span class="kw">fn</span> <span class="ident">generics</span><span class="op">&lt;</span><span class="ident">T</span>: <span class="ident">ToOwned</span><span class="op">&gt;</span>(<span class="ident">value</span>: <span class="kw-2">&amp;</span><span class="ident">T</span>) -&gt; <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">T::Owned</span><span class="op">&gt;</span> {
+        (<span class="number">0</span>..<span class="number">5</span>).<span class="ident">map</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">value</span>.<span class="ident">to_owned</span>()).<span class="ident">collect</span>()
+    }
+
+    <span class="attribute">#[<span class="ident">mock</span>(<span class="ident">using</span> <span class="op">=</span> <span class="string">&quot;CountingMock::count&quot;</span>)]</span>
+    <span class="kw">fn</span> <span class="ident">impl_methods</span>(<span class="ident">value</span>: <span class="kw-2">&amp;</span><span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span>) -&gt; <span class="kw-2">&amp;</span><span class="ident">str</span> {
+        <span class="ident">value</span>.<span class="ident">as_ref</span>()
+    }
+}
+
+<span class="kw">impl</span> <span class="ident">Iterator</span> <span class="kw">for</span> <span class="ident">Test</span> {
+    <span class="kw">type</span> <span class="ident">Item</span> <span class="op">=</span> <span class="ident">u8</span>;
+
+    <span class="attribute">#[<span class="ident">mock</span>(<span class="ident">using</span> <span class="op">=</span> <span class="string">&quot;CountingMock::count&quot;</span>)]</span>
+    <span class="kw">fn</span> <span class="ident">next</span>(<span class="kw-2">&amp;mut</span> <span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident"><span class="self">Self</span>::Item</span><span class="op">&gt;</span> {
+        <span class="prelude-val">Some</span>(<span class="number">42</span>)
+    }
+}
+
+<span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Default</span>, <span class="ident">Mock</span>)]</span>
+<span class="kw">struct</span> <span class="ident">CountingMock</span>(<span class="ident">AtomicU32</span>);
+
+<span class="kw">impl</span> <span class="ident">CheckRealCall</span> <span class="kw">for</span> <span class="ident">CountingMock</span> {}
+
+<span class="kw">impl</span> <span class="ident">CountingMock</span> {
+    <span class="comment">// All functions above can be mocked with a single impl!</span>
+    <span class="comment">// This is quite extreme, obviously; in realistic scenarios,</span>
+    <span class="comment">// you probably wouldn&#39;t be able to unite mocks of functions</span>
+    <span class="comment">// with significantly differing return types.</span>
+    <span class="kw">fn</span> <span class="ident">count</span><span class="op">&lt;</span><span class="ident">T</span>, <span class="ident">R</span>: <span class="ident">Default</span><span class="op">&gt;</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="kw">_</span>: <span class="ident">T</span>) -&gt; <span class="ident">R</span> {
+        <span class="self">self</span>.<span class="number">0</span>.<span class="ident">fetch_add</span>(<span class="number">1</span>, <span class="ident">Ordering::Relaxed</span>);
+        <span class="ident">R::default</span>()
+    }
+}
+
+<span class="kw">let</span> <span class="ident">guard</span> <span class="op">=</span> <span class="ident">CountingMock::default</span>().<span class="ident">set_as_mock</span>();
+<span class="ident">Test</span>.<span class="ident">do_something</span>();
+<span class="macro">assert_eq!</span>(<span class="ident">Test</span>.<span class="ident">lifetimes</span>(), <span class="string">&quot;&quot;</span>);
+<span class="macro">assert_eq!</span>(<span class="ident">Test</span>.<span class="ident">next</span>(), <span class="prelude-val">None</span>);
+<span class="kw">let</span> <span class="ident">count</span> <span class="op">=</span> <span class="ident">guard</span>.<span class="ident">into_inner</span>().<span class="number">0</span>;
+<span class="macro">assert_eq!</span>(<span class="ident">count</span>.<span class="ident">into_inner</span>(), <span class="number">3</span>);</code></pre></div>
+</div></details><h2 id="structs" class="small-section-header"><a href="#structs">Structs</a></h2>
+<div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.Answers.html" title="mimicry::Answers struct">Answers</a></div><div class="item-right docblock-short"><p>Answers for a function call.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.EmptyGuard.html" title="mimicry::EmptyGuard struct">EmptyGuard</a></div><div class="item-right docblock-short"><p>Exclusive guard to set the mock state without an attached state.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.MockGuard.html" title="mimicry::MockGuard struct">MockGuard</a></div><div class="item-right docblock-short"><p>Exclusive guard to set the mock state.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.Mut.html" title="mimicry::Mut struct">Mut</a></div><div class="item-right docblock-short"><p>A lightweight wrapper around the state (essentially, a <a href="https://doc.rust-lang.org/nightly/core/cell/struct.RefCell.html" title="RefCell"><code>RefCell</code></a>) allowing to easily
+mutate it in mock code.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.RealCallSwitch.html" title="mimicry::RealCallSwitch struct">RealCallSwitch</a></div><div class="item-right docblock-short"><p>Switch between real and mocked implementations.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.Shared.html" title="mimicry::Shared struct">Shared</a><span class="stab portability" title="Available on crate feature `shared` only"><code>shared</code></span></div><div class="item-right docblock-short"><p>Wrapper around <a href="trait.Mock.html"><code>Mock</code></a> state that provides cross-thread synchronization.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.Static.html" title="mimicry::Static struct">Static</a></div><div class="item-right docblock-short"><p>Wrapper that allows creating <code>static</code>s with mock state.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="struct" href="struct.ThreadLocal.html" title="mimicry::ThreadLocal struct">ThreadLocal</a></div><div class="item-right docblock-short"><p>Thread-local mock state wrapper.</p>
+</div></div></div><h2 id="traits" class="small-section-header"><a href="#traits">Traits</a></h2>
+<div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="trait" href="trait.CallReal.html" title="mimicry::CallReal trait">CallReal</a></div><div class="item-right docblock-short"><p>Controls delegation to real impls. The provided <code>call_*</code> methods in this trait can be used
+for partial mocking and spying.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="trait" href="trait.CheckRealCall.html" title="mimicry::CheckRealCall trait">CheckRealCall</a></div><div class="item-right docblock-short"><p>Checks whether it is necessary to delegate to real impl instead of the mock.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="trait" href="trait.Mock.html" title="mimicry::Mock trait">Mock</a></div><div class="item-right docblock-short"><p>State of a mock.</p>
+</div></div></div><h2 id="attributes" class="small-section-header"><a href="#attributes">Attribute Macros</a></h2>
+<div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="attr" href="attr.mock.html" title="mimicry::mock attr">mock</a></div><div class="item-right docblock-short"><p>Injects mocking logic into a function / method.</p>
+</div></div></div><h2 id="derives" class="small-section-header"><a href="#derives">Derive Macros</a></h2>
+<div class="item-table"><div class="item-row"><div class="item-left module-item"><a class="derive" href="derive.CallReal.html" title="mimicry::CallReal derive">CallReal</a></div><div class="item-right docblock-short"><p>Derives the <code>CallReal</code> trait for a struct allowing to switch to real implementations
+for partial mocking or spying.</p>
+</div></div><div class="item-row"><div class="item-left module-item"><a class="derive" href="derive.Mock.html" title="mimicry::Mock derive">Mock</a></div><div class="item-right docblock-short"><p>Derives the <code>Mock</code> trait for a type, allowing to use it as a state for mocking.</p>
+</div></div></div></section></div></main><div id="rustdoc-vars" data-root-path="../" data-current-crate="mimicry" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.63.0-nightly (e6a4afc3a 2022-05-20)" ></div>
+</body></html>

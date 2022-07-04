@@ -1,0 +1,38 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="Injects mocking logic into a function / method."><meta name="keywords" content="rust, rustlang, rust-lang, mock"><title>mock in mimicry - Rust</title><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceSerif4-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../FiraSans-Regular.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../FiraSans-Medium.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceCodePro-Regular.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceSerif4-Bold.ttf.woff2"><link rel="preload" as="font" type="font/woff2" crossorigin href="../SourceCodePro-Semibold.ttf.woff2"><link rel="stylesheet" type="text/css" href="../normalize.css"><link rel="stylesheet" type="text/css" href="../rustdoc.css" id="mainThemeStyle"><link rel="stylesheet" type="text/css" href="../ayu.css" disabled><link rel="stylesheet" type="text/css" href="../dark.css" disabled><link rel="stylesheet" type="text/css" href="../light.css" id="themeStyle"><script id="default-settings" ></script><script src="../storage.js"></script><script src="../crates.js"></script><script defer src="../main.js"></script>
+    <noscript><link rel="stylesheet" href="../noscript.css"></noscript><link rel="alternate icon" type="image/png" href="../favicon-16x16.png"><link rel="alternate icon" type="image/png" href="../favicon-32x32.png"><link rel="icon" type="image/svg+xml" href="../favicon.svg"></head><body class="rustdoc attr"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle">&#9776;</button><a class="sidebar-logo" href="../mimicry/index.html"><div class="logo-container"><img class="rust-logo" src="../rust-logo.svg" alt="logo"></div>
+        </a><h2 class="location"></h2>
+    </nav>
+    <nav class="sidebar"><a class="sidebar-logo" href="../mimicry/index.html"><div class="logo-container"><img class="rust-logo" src="../rust-logo.svg" alt="logo"></div>
+        </a><div class="sidebar-elems"><h2 class="location"><a href="index.html">In mimicry</a></h2><div id="sidebar-vars" data-name="mock" data-ty="attr" data-relpath=""></div><script defer src="sidebar-items.js"></script></div></nav><main><div class="width-limiter"><div class="sub-container"><a class="sub-logo-container" href="../mimicry/index.html"><img class="rust-logo" src="../rust-logo.svg" alt="logo"></a><nav class="sub"><form class="search-form"><div class="search-container"><span></span><input class="search-input" name="search" autocomplete="off" spellcheck="false" placeholder="Click or press ‘S’ to search, ‘?’ for more options…" type="search"><button type="button" id="help-button" title="help">?</button><div id="settings-menu" tabindex="-1">
+                                <a href="../settings.html" title="settings"><img width="22" height="22" alt="Change settings" src="../wheel.svg"></a></div>
+                        </div></form></nav></div><section id="main-content" class="content"><div class="main-heading">
+    <h1 class="fqn"><span class="in-band">Attribute Macro <a href="index.html">mimicry</a>::<wbr><a class="attr" href="#">mock</a><button id="copy-path" onclick="copy_path(this)" title="Copy item path to clipboard"><img src="../clipboard.svg" width="19" height="18" alt="Copy item path"></button></span></h1><span class="out-of-band"><a class="srclink" href="https://docs.rs/mimicry-derive/0.1.0/src/mimicry_derive/lib.rs.html#117">source</a> · <a id="toggle-all-docs" href="javascript:void(0)" title="collapse all docs">[<span class="inner">&#x2212;</span>]</a></span></div><div class="docblock item-decl"><pre class="rust attr"><code>#[mock]</code></pre></div><details class="rustdoc-toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p>Injects mocking logic into a function / method.</p>
+<p>You may want to use this attribute conditionally, e.g.,
+behind a <code>#[cfg_attr(test, _)]</code> wrapper.</p>
+<h2 id="attributes"><a href="#attributes">Attributes</a></h2>
+<p>Attributes are specified according to standard Rust conventions:
+<code>#[mock(attr1 = &quot;value1&quot;, ...)]</code>.</p>
+<h3 id="using"><a href="#using"><code>using</code></a></h3>
+<p>Specifies a <a href="https://docs.rs/syn/latest/syn/struct.Path.html">path</a> string to the mock state. The path can point to the type of the mock state
+(e.g., <code>&quot;mocks::State&quot;</code>); in this case, the mock impl is an inherent function of the state
+with the same name as the mocked function / method. Alternatively, a path can specify
+the function name as well (e.g., <code>&quot;mocks::State::mock_something&quot;</code>); this is useful in case
+of name collision. The choice of these 2 options is auto-detected based on the last segment
+in the path: if it starts with an uppercase letter, it is considered a mock state type;
+otherwise, it is considered a type + function.</p>
+<h3 id="rename"><a href="#rename"><code>rename</code></a></h3>
+<p>Specifies a pattern to use when accessing mock impl methods. A pattern is a string with <code>{}</code>
+denoting a placeholder for the mocked function name. For example, <code>mock_{}</code> pattern will
+rename <code>len</code> to <code>mock_len</code>.</p>
+<p>This attribute is mostly useful for impl blocks.</p>
+<h2 id="supported-items"><a href="#supported-items">Supported items</a></h2>
+<p>The <code>mock</code> attribute can be used on functions / methods. Pretty much all signatures
+are supported, e.g., generic functions, non-<code>'static</code> args, return types
+with dependent / elided lifetime, etc. <code>const</code> functions are not supported.</p>
+<p>The <code>mock</code> attribute can also be placed on an impl block (including a trait implementation).
+In this case, it will apply to all methods in the block. If necessary, mocking options can
+be overridden for separate methods in the block by adding a <code>mock</code> attribute on them.</p>
+<h2 id="examples"><a href="#examples">Examples</a></h2>
+<p>See <a href="https://docs.rs/mimicry/"><code>mimicry</code></a> docs for examples of usage.</p>
+</div></details></section></div></main><div id="rustdoc-vars" data-root-path="../" data-current-crate="mimicry" data-themes="ayu,dark,light" data-resource-suffix="" data-rustdoc-version="1.63.0-nightly (e6a4afc3a 2022-05-20)" ></div>
+</body></html>

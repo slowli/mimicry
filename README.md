@@ -1,10 +1,10 @@
 # Lightweight Mocking / Spying Library for Rust
 
-[![Build Status](https://github.com/slowli/mimicry/workflows/Rust/badge.svg?branch=main)](https://github.com/slowli/mimicry/actions)
+[![Build Status](https://github.com/slowli/mimicry/workflows/CI/badge.svg?branch=main)](https://github.com/slowli/mimicry/actions)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue)](https://github.com/slowli/mimicry#license)
 ![rust 1.57+ required](https://img.shields.io/badge/rust-1.57+-blue.svg?label=Required%20Rust)
 
-**Documentation:**
+**Documentation:** [![Docs.rs](https://docs.rs/mimicry/badge.svg)](https://docs.rs/mimicry/)
 [![crate docs (main)](https://img.shields.io/badge/main-yellow.svg?label=docs)](https://slowli.github.io/mimicry/mimicry/)
 
 Mocking in Rust is somewhat hard compared to object-oriented languages. Since there

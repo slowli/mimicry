@@ -269,7 +269,7 @@ mod traits;
 #[cfg(feature = "shared")]
 pub use crate::shared::Shared;
 pub use crate::{
-    answers::Answers,
+    answers::{Answers, AnswersGuard, AnswersSender},
     tls::ThreadLocal,
     traits::{CallReal, CheckRealCall, GetMock, RealCallSwitch},
 };

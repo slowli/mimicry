@@ -1,4 +1,9 @@
+//! Answers for mocks.
+
+use parking_lot::Mutex;
+
 use core::{fmt, iter, mem};
+use std::{sync::Arc, thread};
 
 /// Answers for a function call.
 ///
@@ -43,6 +48,48 @@ use core::{fmt, iter, mem};
 /// let calls = answers.take_calls();
 /// assert_eq!(calls, ["test", "??", "test"]);
 /// ```
+///
+/// ## Channels
+///
+/// Basic usage of [`Answers::channel()`]:
+///
+/// ```
+/// use mimicry::Answers;
+///
+/// let (mut answers, mut sx) = Answers::channel();
+/// // `rx` can be placed in the mock state
+/// sx.send(42).scope(|| {
+///     // Realistically, here you would call something that uses
+///     // the mock, possibly with indirection.
+///     assert_eq!(answers.next_for(()), 42);
+/// });
+/// ```
+///
+/// More advanced usage with explicit [guard](AnswersGuard) handling:
+///
+/// ```
+/// # use mimicry::{Answers, AnswersGuard};
+/// let (mut answers, mut sx) = Answers::channel();
+/// let guard: AnswersGuard<_> = sx.send_all([0, 1, 2, 0, 1]);
+/// for i in 0..4 {
+///     assert_eq!(answers.next_for(i), i % 3);
+/// }
+/// guard.discard(); // ignore the remaining answer
+/// ```
+///
+/// If not all answers were used when a guard is dropped, it panics:
+///
+/// ```should_panic
+/// # use mimicry::Answers;
+/// let (mut answers, mut sx) = Answers::channel();
+/// sx.send_all([0, 1]).scope(|| {
+///     assert_eq!(answers.next_for(()), 0);
+///     // The code under test should make another call to the mock,
+///     // but it does not.
+/// });
+/// ```
+///
+/// ## Functional values
 ///
 /// To deal with more complex cases, `Answers` can contain functional values.
 ///
@@ -150,12 +197,115 @@ impl<V: Send + 'static, Ctx> Answers<V, Ctx> {
     pub fn from_value_once(value: V) -> Self {
         Self::from_values(iter::once(value))
     }
+
+    /// Creates a new `Answers` instance that can receive answers dynamically via a channel.
+    /// The channel functions similar to a [blocking channel](std::sync::mpsc)
+    /// from the standard library.
+    ///
+    /// Unlike with [`Self::from_value()`] / [`Self::from_values()`], using a channel allows
+    /// building answers dynamically after the mock is already set up.
+    #[allow(clippy::missing_panics_doc)] // false positive
+    pub fn channel() -> (Self, AnswersSender<V>) {
+        let channel = Arc::new(Mutex::new(AnswersChannel {
+            answers: Vec::new(),
+        }));
+        let sender = AnswersSender {
+            inner: Arc::clone(&channel),
+        };
+        let this = Self::from_fn(move |_| {
+            let mut guard = channel.lock();
+            guard.answers.pop().unwrap_or_else(|| {
+                panic!("no answer provided for call");
+            })
+        });
+        (this, sender)
+    }
 }
 
 impl<V: Clone + Send + 'static, Ctx> Answers<V, Ctx> {
     /// Answers with the provided `value` infinite number of times.
     pub fn from_value(value: V) -> Self {
         Self::from_values(iter::repeat(value))
+    }
+}
+
+#[derive(Debug)]
+struct AnswersChannel<V> {
+    answers: Vec<V>,
+}
+
+/// Sender part of a channel created by [`Answers::channel()`].
+///
+/// # Examples
+///
+/// See [`Answers`](Answers#channels) for examples of usage.
+#[derive(Debug)]
+pub struct AnswersSender<V> {
+    inner: Arc<Mutex<AnswersChannel<V>>>,
+}
+
+impl<V> AnswersSender<V> {
+    /// Sends a single value over the channel. The value will be used as the next answer.
+    ///
+    /// # Return value
+    ///
+    /// Returns a guard that will automatically check that the value has been used
+    /// when going out of scope.
+    pub fn send(&mut self, value: V) -> AnswersGuard<'_, V> {
+        self.send_all([value])
+    }
+
+    /// Sends several values over the channel. The values will be used as answers in the same order
+    /// as returned by the iterator.
+    ///
+    /// # Return value
+    ///
+    /// Returns a guard that will automatically check that all the values have been used
+    /// when going out of scope.
+    pub fn send_all(&mut self, values: impl IntoIterator<Item = V>) -> AnswersGuard<'_, V> {
+        let mut values: Vec<_> = values.into_iter().collect();
+        values.reverse();
+        *self.inner.lock() = AnswersChannel { answers: values };
+        AnswersGuard {
+            inner: &mut self.inner,
+        }
+    }
+}
+
+/// Guard ensuring that answers sent from an [`AnswersSender`] are timely consumed.
+///
+/// The consumption check is performed on guard drop: either implicit, or explicit
+/// via [`Self::scope()`].
+#[derive(Debug)]
+#[must_use = "If not used, the answer value(s) will be immediately discarded"]
+pub struct AnswersGuard<'a, V> {
+    inner: &'a mut Arc<Mutex<AnswersChannel<V>>>,
+}
+
+impl<V> AnswersGuard<'_, V> {
+    /// Executes the provided closure and checks that all the answers were consumed by it.
+    pub fn scope<R>(self, action: impl FnOnce() -> R) -> R {
+        let result = action();
+        drop(self);
+        result
+    }
+
+    /// Drops this guard discarding any remaining answers, so that the guard does not panic.
+    pub fn discard(self) {
+        self.inner.lock().answers.clear();
+    }
+}
+
+impl<V> Drop for AnswersGuard<'_, V> {
+    fn drop(&mut self) {
+        if !thread::panicking() {
+            let guard = self.inner.lock();
+            assert!(
+                guard.answers.is_empty(),
+                "{} answer(s) not consumed from answers channel",
+                guard.answers.len()
+            );
+        }
     }
 }
 
@@ -217,5 +367,30 @@ mod tests {
         assert_eq!(answers.next_for(())("test"), 4);
         assert_eq!(answers.next_for(())("test"), 4);
         assert_eq!(answers.next_for(())("test"), 1);
+    }
+
+    #[test]
+    fn answers_channel_basics() {
+        let (mut answers, mut sx) = Answers::channel();
+        {
+            let _guard = sx.send(42);
+            assert_eq!(answers.next_for("test"), 42);
+            assert_eq!(answers.take_calls(), ["test"]);
+        }
+        sx.send(1).scope(|| {
+            assert_eq!(answers.next_for("test"), 1);
+        });
+
+        let _guard = sx.send_all([555, 777]);
+        assert_eq!(answers.next_for("foo"), 555);
+        assert_eq!(answers.next_for("bar"), 777);
+    }
+
+    #[test]
+    #[should_panic(expected = "1 answer(s) not consumed")]
+    fn partially_consumed_answers_channel() {
+        let (mut answers, mut sx) = Answers::channel();
+        let _guard = sx.send_all([555, 777]);
+        assert_eq!(answers.next_for("foo"), 555);
     }
 }

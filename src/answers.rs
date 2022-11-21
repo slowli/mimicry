@@ -2,7 +2,7 @@
 
 use parking_lot::Mutex;
 
-use core::{fmt, iter, mem};
+use core::{fmt, future::Future, iter, mem};
 use std::{sync::Arc, thread};
 
 /// Answers for a function call.
@@ -63,6 +63,19 @@ use std::{sync::Arc, thread};
 ///     // the mock, possibly with indirection.
 ///     assert_eq!(answers.next_for(()), 42);
 /// });
+/// ```
+///
+/// Async scope wrapper is also available:
+///
+/// ```
+/// # use mimicry::Answers;
+/// # async fn test_wrapper() {
+/// let (mut answers, mut sx) = Answers::channel();
+/// let future = sx.send(42).async_scope(async {
+///     assert_eq!(answers.next_for(()), 42);
+/// });
+/// future.await;
+/// # }
 /// ```
 ///
 /// More advanced usage with explicit [guard](AnswersGuard) handling:
@@ -286,6 +299,17 @@ impl<V> AnswersGuard<'_, V> {
     /// Executes the provided closure and checks that all the answers were consumed by it.
     pub fn scope<R>(self, action: impl FnOnce() -> R) -> R {
         let result = action();
+        drop(self);
+        result
+    }
+
+    /// Executes the provided future and checks that all the answers were consumed by it.
+    ///
+    /// While [`Self::scope()`]`.await` with a closure that returns a future technically works,
+    /// it will probably result in a failed consumption check. Indeed, the scope
+    /// will be exited and the guard dropped before the future is polled.
+    pub async fn async_scope<Fut: Future>(self, action: Fut) -> Fut::Output {
+        let result = action.await;
         drop(self);
         result
     }

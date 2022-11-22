@@ -82,11 +82,37 @@ pub trait CheckRealCall {
 /// for manual implementation. The trait is also implemented for the [`Mut`](crate::Mut)
 /// and [`MockRef`](crate::MockRef) wrappers.
 ///
-/// Note that [`RealCallGuard`]s returned by [`Self::call_real()`] and [`Self::call_real_once()`]
+/// # Call guard checks
+///
+/// [`RealCallGuard`]s returned by [`Self::call_real()`] and [`Self::call_real_once()`]
 /// must not overlap in terms of their lifetime; otherwise, confusion would arise as to
 /// which calls exactly should be delegated to real implementations. This is checked
 /// in runtime when creating a guard.
-// Unfortunately, we cannot define `call_real(&mut self, ..)` to move these checks
+///
+/// ```should_panic
+/// # use mimicry::{mock, CallReal, Mock, RealCallSwitch};
+/// #[mock(using = "MyMock")]
+/// fn answer() -> u32 { 42 }
+///
+/// #[derive(Default, Mock, CallReal)]
+/// struct MyMock {
+///     // mock state...
+///     _switch: RealCallSwitch,
+/// }
+///
+/// impl MyMock {
+///     fn answer(&self) -> u32 {
+///         let _guard = self.call_real();
+///         let real_answer = self.call_real_once().scope(answer);
+///         // ^ will panic here: there is an alive call switch guard
+///         real_answer + 1
+///     }
+/// }
+///
+/// let _guard = MyMock::default().set_as_mock();
+/// answer(); // triggers the panic
+/// ```
+// Unfortunately, we cannot define `call_real(&mut self, ..)` to move guard checks
 // to compile time; we only have a shared ref to the mock state.
 pub trait CallReal {
     /// Returns a reference to the call switch.
@@ -187,7 +213,7 @@ impl RealCallSwitch {
     }
 }
 
-/// Guards the real / mock implementation switch.
+/// Guard for the real / mock implementation switch.
 ///
 /// `RealCallGuard`s are produced by the methods in the [`CallReal`] trait; see its docs
 /// for more details.

@@ -64,7 +64,7 @@ impl SearchMock {
             Some(42)
         } else {
             let new_needle = if needle == '?' { 'e' } else { needle };
-            this.call_real(|| search(haystack, new_needle))
+            this.call_real().scope(|| search(haystack, new_needle))
         }
     }
 }

@@ -104,8 +104,8 @@ impl CallReal {
 
         quote! {
             impl #impl_generics mimicry::CallReal for #ident #ty_generics #where_clause {
-                fn real_switch(&self) -> &mimicry::RealCallSwitch {
-                    &self.#field
+                fn access_switch<R>(&self, action: impl FnOnce(&RealCallSwitch) -> R) -> R {
+                    action(&self.#field)
                 }
             }
         }

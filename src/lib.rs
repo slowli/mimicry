@@ -114,7 +114,7 @@
 //!             short if short.len() <= 2 => None,
 //!             _ => {
 //!                 let new_needle = if needle == '?' { 'e' } else { needle };
-//!                 self.call_real(|| search(haystack, new_needle))
+//!                 self.call_real().scope(|| search(haystack, new_needle))
 //!             }
 //!         }
 //!     }
@@ -488,6 +488,20 @@ impl<T: Mock<Base = Mut<T>>> MockRef<T> {
     }
 }
 
+impl<T> CallReal for MockRef<T>
+where
+    T: Mock,
+    T::Base: CallReal,
+{
+    fn access_switch<R>(&self, action: impl FnOnce(&RealCallSwitch) -> R) -> R {
+        if let Some(mock_ref) = GetMock::get(self.instance) {
+            mock_ref.access_switch(action)
+        } else {
+            panic!("mock state is gone");
+        }
+    }
+}
+
 /// A lightweight wrapper around the state (essentially, a [`RefCell`]) allowing to easily
 /// mutate it in mock code.
 ///
@@ -562,8 +576,8 @@ impl<T> Wrap<T> for Mut<T> {
 }
 
 impl<T> CallReal for Mut<T> {
-    fn real_switch(&self) -> &RealCallSwitch {
-        &self.switch
+    fn access_switch<R>(&self, action: impl FnOnce(&RealCallSwitch) -> R) -> R {
+        action(&self.switch)
     }
 }
 

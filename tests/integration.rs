@@ -1,3 +1,5 @@
+use async_recursion::async_recursion;
+
 use std::{
     borrow::Borrow,
     collections::HashMap,
@@ -29,7 +31,9 @@ fn mock_basics() {
             match haystack {
                 "test" => Some(42),
                 short if short.len() <= 2 => None,
-                _ => this.call_real(|| search(haystack, if needle == '?' { 'e' } else { needle })),
+                _ => this
+                    .call_real()
+                    .scope(|| search(haystack, if needle == '?' { 'e' } else { needle })),
             }
         }
     }
@@ -73,7 +77,8 @@ fn mock_with_lifetimes() {
             if bytes == b"test" {
                 Some(&0)
             } else {
-                self.call_real(|| tail(bytes))
+                let _guard = self.call_real();
+                tail(bytes)
             }
         }
     }
@@ -142,7 +147,7 @@ fn mock_consuming_args() {
             if bytes.is_ascii() {
                 Some(String::from("ASCII"))
             } else {
-                self.call_real(|| consume(bytes))
+                self.call_real().scope(|| consume(bytes))
             }
         }
     }
@@ -183,7 +188,7 @@ fn mock_for_generic_function() {
     impl GenericMock {
         fn len(this: &Mut<Self>, value: impl AsRef<str>) -> usize {
             this.borrow().len_args.push(value.as_ref().to_owned());
-            this.call_real(|| len(value))
+            this.call_real().scope(|| len(value))
         }
 
         fn get_key<K, Q: ?Sized>(this: &Mut<Self>, map: &HashMap<K, usize>, key: &Q) -> usize
@@ -191,7 +196,7 @@ fn mock_for_generic_function() {
             K: Borrow<Q> + Eq + Hash,
             Q: Eq + Hash,
         {
-            let response = this.call_real(|| get_key(map, key));
+            let response = this.call_real().scope(|| get_key(map, key));
             this.borrow().get_key_responses.push(response);
             response
         }
@@ -248,7 +253,7 @@ fn mock_in_impl() {
             if wrapper.0.as_ref() == "test" {
                 42
             } else {
-                self.call_real(|| wrapper.len())
+                self.call_real().scope(|| wrapper.len())
             }
         }
 
@@ -260,7 +265,7 @@ fn mock_in_impl() {
             if s.as_ref().len() < self.min_length {
                 wrapper
             } else {
-                self.call_real(|| wrapper.push(s))
+                self.call_real().scope(|| wrapper.push(s))
             }
         }
 
@@ -373,10 +378,11 @@ fn recursive_fn() {
             if n < 5 {
                 *acc // finish the recursion early
             } else if self.fallback_once.load(Ordering::Relaxed) {
-                self.call_real_once(|| factorial(n, acc))
+                self.call_real_once().scope(|| factorial(n, acc))
             } else {
                 // Fallback should be applied to both calls here
-                self.call_real(|| factorial(n, acc) * factorial(n - 5, &mut 1))
+                let _guard = self.call_real();
+                factorial(n, acc) * factorial(n - 5, &mut 1)
             }
         }
     }
@@ -513,11 +519,16 @@ async fn mocking_async_function_with_mutable_state() {
     struct AsyncValueMock(u32);
 
     impl AsyncValueMock {
+        #[async_recursion]
         async fn tested(r: MockRef<Self>) -> u32 {
-            r.with_mut(|this| {
-                this.0 += 1;
-                this.0
-            })
+            let value = r.with_mut(|this| this.0);
+            if value == 0 {
+                let value = r.call_real().async_scope(tested()).await;
+                r.with_mut(|this| this.0 = value);
+                value
+            } else {
+                value
+            }
         }
     }
 
@@ -526,8 +537,7 @@ async fn mocking_async_function_with_mutable_state() {
         42
     }
 
+    let guard = AsyncValueMock::default().set_as_mock();
     assert_eq!(tested().await, 42);
-    let _guard = AsyncValueMock::default().set_as_mock();
-    assert_eq!(tested().await, 1);
-    assert_eq!(tested().await, 2);
+    assert_eq!(guard.into_inner().0, 42);
 }

@@ -49,14 +49,9 @@ impl FunctionWrapper {
             let message = "const functions are not supported";
             return Err(darling::Error::custom(message).with_span(const_token));
         }
-        if let Some(async_token) = &signature.asyncness {
-            let message = "async functions are not yet supported";
-            return Err(darling::Error::custom(message).with_span(async_token));
-        }
         Ok(())
     }
 
-    // TODO: support async fns if feasible
     fn new(attrs: FunctionAttrs, mut function: ItemFn) -> darling::Result<Self> {
         Self::can_process(&function.sig)?;
 
@@ -149,12 +144,26 @@ impl FunctionWrapper {
         let state = &self.state;
         let mock_fn = &self.mock_fn;
 
-        quote! {
-            {
-                let instance = <#state as mimicry::Mock>::instance();
-                if let Some(mock_ref) = mimicry::GetMock::get(instance) {
-                    if !mimicry::CheckRealCall::should_call_real(&*mock_ref) {
-                        return #state::#mock_fn(&*mock_ref, #recv #(#args,)*);
+        if self.function.sig.asyncness.is_some() {
+            quote! {
+                {
+                    let instance = <#state as mimicry::Mock>::instance();
+                    let should_call_real = mimicry::GetMock::get(instance)
+                        .map_or(true, |mock_ref| mimicry::CheckRealCall::should_call_real(&*mock_ref));
+                    if !should_call_real {
+                        let mock_ref = mimicry::MockRef::<#state>::new(instance);
+                        return #state::#mock_fn(mock_ref, #recv #(#args,)*).await;
+                    }
+                }
+            }
+        } else {
+            quote! {
+                {
+                    let instance = <#state as mimicry::Mock>::instance();
+                    if let Some(mock_ref) = mimicry::GetMock::get(instance) {
+                        if !mimicry::CheckRealCall::should_call_real(&*mock_ref) {
+                            return #state::#mock_fn(&*mock_ref, #recv #(#args,)*);
+                        }
                     }
                 }
             }

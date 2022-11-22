@@ -428,6 +428,66 @@ where
     }
 }
 
+/// Reference to a mock state used when mocking async functions / methods.
+///
+/// # Examples
+///
+/// FIXME
+#[derive(Debug)]
+pub struct MockRef<T: Mock> {
+    instance: &'static Static<T::Shared>,
+}
+
+impl<T: Mock> Clone for MockRef<T> {
+    fn clone(&self) -> Self {
+        Self {
+            instance: self.instance,
+        }
+    }
+}
+
+impl<T: Mock> Copy for MockRef<T> {}
+
+impl<T: Mock> MockRef<T> {
+    #[doc(hidden)] // used by the `mock` macro
+    pub fn new(instance: &'static Static<T::Shared>) -> Self {
+        Self { instance }
+    }
+}
+
+impl<T: Mock<Base = T>> MockRef<T> {
+    /// Accesses the underlying mock state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mock state has gone missing. This is a sign that test code is ill-constructed
+    /// (e.g., the mock is removed before all mocked calls are made).
+    pub fn with<R>(&self, action: impl FnOnce(&T) -> R) -> R {
+        if let Some(mock_ref) = GetMock::get(self.instance) {
+            action(&*mock_ref)
+        } else {
+            panic!("mock state is gone");
+        }
+    }
+}
+
+impl<T: Mock<Base = Mut<T>>> MockRef<T> {
+    /// Accesses the underlying [`Mut`]able mock state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mock state has gone missing. This is a sign that test code is ill-constructed
+    /// (e.g., the mock is removed before all mocked calls are made).
+    pub fn with_mut<R>(&self, action: impl FnOnce(&mut T) -> R) -> R {
+        if let Some(mock_ref) = GetMock::get(self.instance) {
+            let base: &Mut<T> = &mock_ref;
+            action(&mut base.borrow())
+        } else {
+            panic!("mock state is gone");
+        }
+    }
+}
+
 /// A lightweight wrapper around the state (essentially, a [`RefCell`]) allowing to easily
 /// mutate it in mock code.
 ///

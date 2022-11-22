@@ -7,7 +7,7 @@ use std::{
     thread,
 };
 
-use mimicry::{mock, CallReal, Mock, Mut, RealCallSwitch};
+use mimicry::{mock, CallReal, Mock, MockRef, Mut, RealCallSwitch};
 
 #[test]
 fn mock_basics() {
@@ -480,4 +480,54 @@ fn locking_shared_mocks() {
     let second_test_handle = thread::spawn(second_test);
     first_test_handle.join().unwrap();
     second_test_handle.join().unwrap();
+}
+
+#[async_std::test]
+async fn mocking_async_function() {
+    #[derive(Debug, Default, Mock)]
+    struct AsyncValueMock(AtomicU32);
+
+    impl mimicry::CheckRealCall for AsyncValueMock {}
+
+    impl AsyncValueMock {
+        async fn tested(r: MockRef<Self>) -> u32 {
+            r.with(|this| this.0.fetch_add(1, Ordering::Relaxed))
+        }
+    }
+
+    #[mock(using = "AsyncValueMock")]
+    async fn tested() -> u32 {
+        42
+    }
+
+    assert_eq!(tested().await, 42);
+    let _guard = AsyncValueMock::default().set_as_mock();
+    assert_eq!(tested().await, 0);
+    assert_eq!(tested().await, 1);
+}
+
+#[async_std::test]
+async fn mocking_async_function_with_mutable_state() {
+    #[derive(Debug, Default, Mock)]
+    #[mock(mut)]
+    struct AsyncValueMock(u32);
+
+    impl AsyncValueMock {
+        async fn tested(r: MockRef<Self>) -> u32 {
+            r.with_mut(|this| {
+                this.0 += 1;
+                this.0
+            })
+        }
+    }
+
+    #[mock(using = "AsyncValueMock")]
+    async fn tested() -> u32 {
+        42
+    }
+
+    assert_eq!(tested().await, 42);
+    let _guard = AsyncValueMock::default().set_as_mock();
+    assert_eq!(tested().await, 1);
+    assert_eq!(tested().await, 2);
 }

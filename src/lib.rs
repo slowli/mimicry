@@ -275,7 +275,7 @@ pub use crate::shared::Shared;
 pub use crate::{
     answers::{Answers, AnswersGuard, AnswersSender},
     tls::ThreadLocal,
-    traits::{CallReal, CheckRealCall, GetMock, RealCallSwitch, RealCallGuard},
+    traits::{CallReal, CheckRealCall, GetMock, RealCallGuard, RealCallSwitch},
 };
 pub use mimicry_derive::{mock, CallReal, Mock};
 

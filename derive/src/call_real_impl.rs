@@ -1,9 +1,12 @@
 //! `CallReal` trait derivation.
 
-use darling::{FromDeriveInput, FromMeta};
+use darling::FromMeta;
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{Data, DataStruct, DeriveInput, Field, Fields, Generics, Ident, Index, Type, TypePath};
+use syn::{
+    parse::Error as SynError, spanned::Spanned, Data, DataStruct, DeriveInput, Field, Fields,
+    Generics, Ident, Index, Type, TypePath,
+};
 
 use crate::utils::find_meta_attrs;
 
@@ -45,7 +48,23 @@ struct CallReal {
 }
 
 impl CallReal {
-    fn detect_switch_field(fields: &Fields) -> darling::Result<FieldIdent> {
+    fn new(input: &DeriveInput) -> Result<Self, SynError> {
+        let fields = if let Data::Struct(DataStruct { fields, .. }) = &input.data {
+            fields
+        } else {
+            let message = "can only derive `CallReal` for structs";
+            return Err(SynError::new(input.span(), message));
+        };
+
+        let switch_field = Self::detect_switch_field(fields)?;
+        Ok(Self {
+            generics: input.generics.clone(),
+            ident: input.ident.clone(),
+            switch_field,
+        })
+    }
+
+    fn detect_switch_field(fields: &Fields) -> Result<FieldIdent, SynError> {
         let tagged_fields = fields.iter().enumerate().filter_map(|(i, field)| {
             let attr = find_meta_attrs("mock", None, &field.attrs);
             let attr = attr
@@ -60,7 +79,7 @@ impl CallReal {
             [(idx, field)] => return Ok(FieldIdent::new(*idx, field)),
             [_, (_, field), ..] => {
                 let message = "Multiple `#[mock(switch)]` attrs; there should be no more than one";
-                return Err(darling::Error::custom(message).with_span(field));
+                return Err(SynError::new_spanned(field, message));
             }
         }
 
@@ -76,13 +95,13 @@ impl CallReal {
             [] => {
                 let message = "No fields of `RealCallSwitch` type. Please add such a field, \
                     or, if it's present, mark it with `#[mock(switch)]` attr";
-                Err(darling::Error::custom(message).with_span(fields))
+                Err(SynError::new(fields.span(), message))
             }
             [(idx, field)] => Ok(FieldIdent::new(*idx, field)),
             [_, (_, field), ..] => {
                 let message = "Multiple fields with `RealCallSwitch` type. \
                     Mark the expected one with `#[mock(switch)]` attr";
-                Err(darling::Error::custom(message).with_span(field))
+                Err(SynError::new_spanned(field, message))
             }
         }
     }
@@ -112,24 +131,6 @@ impl CallReal {
     }
 }
 
-impl FromDeriveInput for CallReal {
-    fn from_derive_input(input: &DeriveInput) -> darling::Result<Self> {
-        let fields = if let Data::Struct(DataStruct { fields, .. }) = &input.data {
-            fields
-        } else {
-            let message = "can only derive `CallReal` for structs";
-            return Err(darling::Error::custom(message).with_span(input));
-        };
-
-        let switch_field = Self::detect_switch_field(fields)?;
-        Ok(Self {
-            generics: input.generics.clone(),
-            ident: input.ident.clone(),
-            switch_field,
-        })
-    }
-}
-
 impl ToTokens for CallReal {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let call_real_impl = self.impl_call_real();
@@ -139,9 +140,9 @@ impl ToTokens for CallReal {
 
 pub(crate) fn impl_call_real(input: TokenStream) -> TokenStream {
     let input: DeriveInput = syn::parse(input).unwrap();
-    let trait_impl = match CallReal::from_derive_input(&input) {
+    let trait_impl = match CallReal::new(&input) {
         Ok(trait_impl) => trait_impl,
-        Err(err) => return err.write_errors().into(),
+        Err(err) => return err.into_compile_error().into(),
     };
     let tokens = quote!(#trait_impl);
     tokens.into()

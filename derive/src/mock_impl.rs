@@ -1,9 +1,12 @@
 //! Derivation of `Mock` trait.
 
-use darling::{FromDeriveInput, FromMeta};
+use darling::FromMeta;
 use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use syn::{parse_quote, spanned::Spanned, DeriveInput, GenericParam, Generics, Ident};
+use syn::{
+    parse::Error as SynError, parse_quote, spanned::Spanned, DeriveInput, GenericParam, Generics,
+    Ident,
+};
 
 use crate::utils::find_meta_attrs;
 
@@ -24,6 +27,33 @@ struct Mock {
 }
 
 impl Mock {
+    fn new(input: &DeriveInput) -> Result<Self, SynError> {
+        let attrs = find_meta_attrs("mock", None, &input.attrs).map_or_else(
+            || Ok(MockAttrs::default()),
+            |meta| MockAttrs::from_nested_meta(&meta),
+        )?;
+
+        let mut params = input.generics.params.iter();
+        let lifetime_span = params.find_map(|param| {
+            if matches!(param, GenericParam::Lifetime(_)) {
+                Some(param.span())
+            } else {
+                None
+            }
+        });
+        if let Some(span) = lifetime_span {
+            let message = "Mock states with lifetimes are not supported";
+            return Err(SynError::new(span, message));
+        }
+
+        Ok(Self {
+            generics: input.generics.clone(),
+            ident: input.ident.clone(),
+            shared: attrs.shared,
+            mutable: attrs.mutable,
+        })
+    }
+
     fn impl_mock(&self) -> impl ToTokens {
         let ident = &self.ident;
         let base = if self.mutable {
@@ -64,35 +94,6 @@ impl Mock {
     }
 }
 
-impl FromDeriveInput for Mock {
-    fn from_derive_input(input: &DeriveInput) -> darling::Result<Self> {
-        let attrs = find_meta_attrs("mock", None, &input.attrs).map_or_else(
-            || Ok(MockAttrs::default()),
-            |meta| MockAttrs::from_nested_meta(&meta),
-        )?;
-
-        let mut params = input.generics.params.iter();
-        let lifetime_span = params.find_map(|param| {
-            if matches!(param, GenericParam::Lifetime(_)) {
-                Some(param.span())
-            } else {
-                None
-            }
-        });
-        if let Some(span) = lifetime_span {
-            let message = "Mock states with lifetimes are not supported";
-            return Err(darling::Error::custom(message).with_span(&span));
-        }
-
-        Ok(Self {
-            generics: input.generics.clone(),
-            ident: input.ident.clone(),
-            shared: attrs.shared,
-            mutable: attrs.mutable,
-        })
-    }
-}
-
 impl ToTokens for Mock {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         let mock_impl = self.impl_mock();
@@ -102,9 +103,9 @@ impl ToTokens for Mock {
 
 pub(crate) fn impl_mock(input: TokenStream) -> TokenStream {
     let input: DeriveInput = syn::parse(input).unwrap();
-    let trait_impl = match Mock::from_derive_input(&input) {
+    let trait_impl = match Mock::new(&input) {
         Ok(trait_impl) => trait_impl,
-        Err(err) => return err.write_errors().into(),
+        Err(err) => return err.into_compile_error().into(),
     };
     let tokens = quote!(#trait_impl);
     tokens.into()

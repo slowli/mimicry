@@ -5,8 +5,8 @@ use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::{quote, quote_spanned, ToTokens};
 use syn::{
-    parse::Parser, punctuated::Punctuated, spanned::Spanned, token::Comma, FnArg, Ident, Item,
-    ItemFn, ItemImpl, NestedMeta, Pat, PatIdent, Path, Signature,
+    parse::Error as SynError, parse::Parser, punctuated::Punctuated, spanned::Spanned,
+    token::Comma, FnArg, Ident, Item, ItemFn, ItemImpl, NestedMeta, Pat, PatIdent, Path, Signature,
 };
 
 use std::mem;
@@ -44,15 +44,15 @@ pub struct FunctionWrapper {
 }
 
 impl FunctionWrapper {
-    fn can_process(signature: &Signature) -> darling::Result<()> {
+    fn can_process(signature: &Signature) -> Result<(), SynError> {
         if let Some(const_token) = &signature.constness {
-            let message = "const functions are not supported";
-            return Err(darling::Error::custom(message).with_span(const_token));
+            let message = "const functions cannot be mocked";
+            return Err(SynError::new(const_token.span(), message));
         }
         Ok(())
     }
 
-    fn new(attrs: FunctionAttrs, mut function: ItemFn) -> darling::Result<Self> {
+    fn new(attrs: FunctionAttrs, mut function: ItemFn) -> Result<Self, SynError> {
         Self::can_process(&function.sig)?;
 
         let mut state = attrs.using;
@@ -184,13 +184,13 @@ struct ImplWrapper {
 }
 
 impl ImplWrapper {
-    fn new(mut attrs: FunctionAttrs, mut block: ItemImpl) -> darling::Result<Self> {
+    fn new(mut attrs: FunctionAttrs, mut block: ItemImpl) -> Result<Self, SynError> {
         let maybe_fn = FunctionWrapper::split_off_function(&mut attrs.using);
         if maybe_fn.is_some() {
             let message = "function specification is not supported for impl blocks; \
                  use the `rename` attr instead, such as \
                  `#[mock(using = \"Mock\", rename = \"mock_{}\")]";
-            return Err(darling::Error::custom(message).with_span(&attrs.using));
+            return Err(SynError::new(attrs.using.span(), message));
         }
 
         let path = &attrs.using;
@@ -238,14 +238,14 @@ pub(crate) fn wrap(attr: TokenStream, item: TokenStream) -> TokenStream {
         Ok(item) => {
             let message = "Item is not supported; use `#[mock] on functions, \
                 methods, or impl blocks";
-            Err(darling::Error::custom(message).with_span(&item))
+            Err(SynError::new_spanned(&item, message))
         }
         Err(err) => return err.into_compile_error().into(),
     };
 
     match tokens {
         Ok(tokens) => tokens.into(),
-        Err(err) => err.write_errors().into(),
+        Err(err) => err.into_compile_error().into(),
     }
 }
 

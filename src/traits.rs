@@ -1,7 +1,7 @@
 //! Lower-level traits used to generalize the concept of mock state shared between tests
 //! and the tested code.
 
-use core::{cell::Cell, ops};
+use core::{cell::Cell, future::Future, ops};
 
 /// Interface to get mock state.
 #[doc(hidden)] // only used by generated code
@@ -77,32 +77,82 @@ pub trait CheckRealCall {
 
 /// Controls delegation to real impls. The provided `call_*` methods in this trait can be used
 /// for partial mocking and spying.
+///
+/// This trait can be derived using the corresponding macro; it's not intended
+/// for manual implementation. The trait is also implemented for the [`Mut`](crate::Mut)
+/// and [`MockRef`](crate::MockRef) wrappers.
+///
+/// # Call guard checks
+///
+/// [`RealCallGuard`]s returned by [`Self::call_real()`] and [`Self::call_real_once()`]
+/// must not overlap in terms of their lifetime; otherwise, confusion would arise as to
+/// which calls exactly should be delegated to real implementations. This is checked
+/// in runtime when creating a guard.
+///
+/// ```should_panic
+/// # use mimicry::{mock, CallReal, Mock, RealCallSwitch};
+/// #[mock(using = "MyMock")]
+/// fn answer() -> u32 { 42 }
+///
+/// #[derive(Default, Mock, CallReal)]
+/// struct MyMock {
+///     // mock state...
+///     _switch: RealCallSwitch,
+/// }
+///
+/// impl MyMock {
+///     fn answer(&self) -> u32 {
+///         let _guard = self.call_real();
+///         let real_answer = self.call_real_once().scope(answer);
+///         // ^ will panic here: there is an alive call switch guard
+///         real_answer + 1
+///     }
+/// }
+///
+/// let _guard = MyMock::default().set_as_mock();
+/// answer(); // triggers the panic
+/// ```
+// Unfortunately, we cannot define `call_real(&mut self, ..)` to move guard checks
+// to compile time; we only have a shared ref to the mock state.
 pub trait CallReal {
     /// Returns a reference to the call switch.
-    fn real_switch(&self) -> &RealCallSwitch;
+    #[doc(hidden)] // low-level implementation detail
+    fn access_switch<R>(&self, action: impl FnOnce(&RealCallSwitch) -> R) -> R;
 
-    /// Runs the provided closure with all calls to the mocked function / method being
-    /// directed to "real" implementation.
-    fn call_real<R>(&self, action: impl FnOnce() -> R) -> R {
-        let switch = <Self as CallReal>::real_switch(self);
-        switch.0.set(RealCallMode::Always);
-        let _guard = RealCallGuard { switch };
-        action()
+    /// Delegates all calls to the mocked functions / methods to the real implementation until
+    /// the returned [`RealCallGuard`] is dropped.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the real / mock implementation switch is already set to "real"
+    /// (e.g., there is an alive guard produced by an earlier call to [`Self::call_real()`]).
+    /// This may lead to unexpected switch value for the further calls and is thus prohibited.
+    fn call_real(&self) -> RealCallGuard<'_, Self> {
+        <Self as CallReal>::access_switch(self, |switch| {
+            switch.assert_inactive();
+            switch.0.set(RealCallMode::Always);
+        });
+        RealCallGuard { controller: self }
     }
 
-    /// Runs the provided closure with the *first* call to the mocked function / method being
-    /// directed to "real" implementation. Further calls will be directed to the mock.
-    fn call_real_once<R>(&self, action: impl FnOnce() -> R) -> R {
-        let switch = <Self as CallReal>::real_switch(self);
-        switch.0.set(RealCallMode::Once);
-        let _guard = RealCallGuard { switch };
-        action()
+    /// Delegates the first call to the mocked functions / methods to the real implementation until
+    /// the returned [`RealCallGuard`] is dropped. Further calls will be directed to the mock.
+    ///
+    /// # Panics
+    ///
+    /// Panics under the same circumstances as [`Self::call_real()`].
+    fn call_real_once(&self) -> RealCallGuard<'_, Self> {
+        <Self as CallReal>::access_switch(self, |switch| {
+            switch.assert_inactive();
+            switch.0.set(RealCallMode::Once);
+        });
+        RealCallGuard { controller: self }
     }
 }
 
 impl<T: CallReal> CheckRealCall for T {
     fn should_call_real(&self) -> bool {
-        self.real_switch().should_delegate()
+        self.access_switch(RealCallSwitch::should_delegate)
     }
 }
 
@@ -136,23 +186,7 @@ impl Default for RealCallMode {
 /// // You can now use `CallReal` methods in mock logic:
 /// impl MockState {
 ///     fn mock_something(&self, arg: &str) {
-///         self.call_real(|| { /* ... */ });
-///     }
-/// }
-/// ```
-///
-/// The derive logic is nothing magical; it can be easily replicated manually if necessary:
-///
-/// ```
-/// # use mimicry::{CallReal, RealCallSwitch};
-/// struct MockState {
-///     // other fields...
-///     switch: RealCallSwitch,
-/// }
-///
-/// impl CallReal for MockState {
-///     fn real_switch(&self) -> &RealCallSwitch {
-///         &self.switch
+///         self.call_real().scope(|| { /* ... */ });
 ///     }
 /// }
 /// ```
@@ -167,15 +201,48 @@ impl RealCallSwitch {
         }
         mode != RealCallMode::Inactive
     }
+
+    fn assert_inactive(&self) {
+        assert_eq!(
+            self.0.get(),
+            RealCallMode::Inactive,
+            "Real / mock switch is set to \"real\" when `call_real()` or `call_real_once()` \
+             is called. This may lead to unexpected switch value for the further calls \
+             and is thus prohibited"
+        );
+    }
 }
 
+/// Guard for the real / mock implementation switch.
+///
+/// `RealCallGuard`s are produced by the methods in the [`CallReal`] trait; see its docs
+/// for more details.
 #[derive(Debug)]
-struct RealCallGuard<'a> {
-    switch: &'a RealCallSwitch,
+#[must_use = "If unused, the guard won't affect any calls"]
+pub struct RealCallGuard<'a, T: CallReal + ?Sized> {
+    controller: &'a T,
 }
 
-impl Drop for RealCallGuard<'_> {
+impl<T: CallReal + ?Sized> Drop for RealCallGuard<'_, T> {
     fn drop(&mut self) {
-        self.switch.0.set(RealCallMode::Inactive);
+        self.controller.access_switch(|switch| {
+            switch.0.set(RealCallMode::Inactive);
+        });
+    }
+}
+
+impl<T: CallReal + ?Sized> RealCallGuard<'_, T> {
+    /// Executes the provided closure under this guard and then drops it.
+    pub fn scope<R>(self, action: impl FnOnce() -> R) -> R {
+        let result = action();
+        drop(self);
+        result
+    }
+
+    /// Executes the provided future under this guard and then drops it.
+    pub async fn async_scope<Fut: Future>(self, action: Fut) -> Fut::Output {
+        let result = action.await;
+        drop(self);
+        result
     }
 }

@@ -32,7 +32,8 @@
 //!   but this can be customized.
 //! 4. If the state needs to be mutated in mock logic, add a `#[mock(mut)]` attr on the state.
 //!   In this case, the mock method will receive `&`[`Mut`]`<Self>` wrapper as the first arg
-//!   instead of `&self`.
+//!   instead of `&self`. If the mocked function / method is `async`, the mock implementation
+//!   will receive [`MockRef`]`<Self>` as the first arg.
 //! 5. If the mock logic needs to be shared across threads, add a `#[mock(shared)]` attr
 //!   on the state. (By default, mocks are thread-local.)
 //! 6. Set the mock state in tests using [`Mock::set_as_mock()`]. Inspect the state during tests
@@ -114,7 +115,7 @@
 //!             short if short.len() <= 2 => None,
 //!             _ => {
 //!                 let new_needle = if needle == '?' { 'e' } else { needle };
-//!                 self.call_real(|| search(haystack, new_needle))
+//!                 self.call_real().scope(|| search(haystack, new_needle))
 //!             }
 //!         }
 //!     }
@@ -247,6 +248,9 @@
 //! let count = guard.into_inner().0;
 //! assert_eq!(count.into_inner(), 3);
 //! ```
+//!
+//! Finally, `async` functions can be mocked as well, although they require a bit more complex
+//! setup. See [`MockRef`] docs for examples.
 
 // Documentation settings.
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -271,7 +275,7 @@ pub use crate::shared::Shared;
 pub use crate::{
     answers::{Answers, AnswersGuard, AnswersSender},
     tls::ThreadLocal,
-    traits::{CallReal, CheckRealCall, GetMock, RealCallSwitch},
+    traits::{CallReal, CheckRealCall, GetMock, RealCallGuard, RealCallSwitch},
 };
 pub use mimicry_derive::{mock, CallReal, Mock};
 
@@ -428,6 +432,143 @@ where
     }
 }
 
+/// Reference to a mock state used when mocking async functions / methods.
+///
+/// A separate reference type is required because it would be unsound to spill a direct state reference
+/// or a reference to [`Mut`] across `await` boundaries. (Internally, such a reference
+/// is produced using interior mutability primitives like [`RefCell`].) Instead, `MockRef`
+/// provides access to the state using [`with()`](Self::with()) or [`with_mut()`](Self::with_mut())
+/// methods that do not overly restrict the lifetime of the state reference.
+///
+/// # Examples
+///
+/// ## Mock with immutable state
+///
+/// ```
+/// # use mimicry::{mock, CheckRealCall, Mock, MockRef};
+/// # use std::sync::atomic::{AtomicU32, Ordering};
+/// #[mock(using = "CountingMock")]
+/// async fn answer() -> u32 { 42 }
+///
+/// #[derive(Default, Mock)]
+/// struct CountingMock(AtomicU32);
+///
+/// impl CheckRealCall for CountingMock {}
+///
+/// impl CountingMock {
+///     async fn answer(r: MockRef<Self>) -> u32 {
+///         r.with(|this| this.0.fetch_add(1, Ordering::Relaxed))
+///     }
+/// }
+/// ```
+///
+/// ## Mock with mutable state
+///
+/// Also demonstrates spying logic.
+///
+/// ```
+/// # use async_recursion::async_recursion;
+/// # use async_std::task::block_on;
+/// # use mimicry::{mock, CallReal, Mock, MockRef};
+/// #[mock(using = "CountingMock")]
+/// async fn answer() -> u32 { 42 }
+///
+/// #[derive(Default, Mock)]
+/// #[mock(mut)]
+/// struct CountingMock {
+///     captured_value: Option<u32>,
+/// }
+///
+/// impl CountingMock {
+///     #[async_recursion] // workaround for `async fn` recursion
+///     async fn answer(r: MockRef<Self>) -> u32 {
+///         let captured = r.with_mut(|this| this.captured_value);
+///         if let Some(captured) = captured {
+///             captured
+///         } else {
+///             let value = r.call_real().async_scope(answer()).await;
+///             r.with_mut(|this| this.captured_value = Some(value));
+///             value
+///         }
+///     }
+/// }
+///
+/// # block_on(async {
+/// let guard = CountingMock::default().set_as_mock();
+/// assert_eq!(answer().await, 42);
+/// let captured = guard.into_inner().captured_value;
+/// assert_eq!(captured, Some(42));
+/// # })
+/// ```
+#[derive(Debug)]
+pub struct MockRef<T: Mock> {
+    instance: &'static Static<T::Shared>,
+}
+
+impl<T: Mock> Clone for MockRef<T> {
+    fn clone(&self) -> Self {
+        Self {
+            instance: self.instance,
+        }
+    }
+}
+
+impl<T: Mock> Copy for MockRef<T> {}
+
+impl<T: Mock> MockRef<T> {
+    #[doc(hidden)] // used by the `mock` macro
+    pub fn new(instance: &'static Static<T::Shared>) -> Self {
+        Self { instance }
+    }
+}
+
+impl<T: Mock<Base = T>> MockRef<T> {
+    /// Accesses the underlying mock state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mock state has gone missing. This is a sign that test code is ill-constructed
+    /// (e.g., the mock is removed before all mocked calls are made).
+    pub fn with<R>(&self, action: impl FnOnce(&T) -> R) -> R {
+        if let Some(mock_ref) = GetMock::get(self.instance) {
+            action(&*mock_ref)
+        } else {
+            panic!("mock state is gone");
+        }
+    }
+}
+
+impl<T: Mock<Base = Mut<T>>> MockRef<T> {
+    /// Accesses the underlying [`Mut`]able mock state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the mock state has gone missing. This is a sign that test code is ill-constructed
+    /// (e.g., the mock is removed before all mocked calls are made).
+    pub fn with_mut<R>(&self, action: impl FnOnce(&mut T) -> R) -> R {
+        if let Some(mock_ref) = GetMock::get(self.instance) {
+            let base: &Mut<T> = &mock_ref;
+            action(&mut base.borrow())
+        } else {
+            panic!("mock state is gone");
+        }
+    }
+}
+
+impl<T> CallReal for MockRef<T>
+where
+    T: Mock,
+    T::Base: CallReal,
+{
+    fn access_switch<R>(&self, action: impl FnOnce(&RealCallSwitch) -> R) -> R {
+        if let Some(mock_ref) = GetMock::get(self.instance) {
+            mock_ref.access_switch(action)
+        } else {
+            panic!("mock state is gone");
+        }
+    }
+}
+
 /// A lightweight wrapper around the state (essentially, a [`RefCell`]) allowing to easily
 /// mutate it in mock code.
 ///
@@ -502,8 +643,8 @@ impl<T> Wrap<T> for Mut<T> {
 }
 
 impl<T> CallReal for Mut<T> {
-    fn real_switch(&self) -> &RealCallSwitch {
-        &self.switch
+    fn access_switch<R>(&self, action: impl FnOnce(&RealCallSwitch) -> R) -> R {
+        action(&self.switch)
     }
 }
 

@@ -1,0 +1,5 @@
+error: const functions cannot be mocked
+ --> tests/ui/mocked_const_fn.rs:4:1
+  |
+4 | const fn mock_target() -> u32 {
+  | ^^^^^

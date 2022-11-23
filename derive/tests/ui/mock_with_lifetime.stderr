@@ -1,0 +1,5 @@
+error: Mock states with lifetimes are not supported
+ --> tests/ui/mock_with_lifetime.rs:4:21
+  |
+4 | struct WithLifetime<'a> {
+  |                     ^^

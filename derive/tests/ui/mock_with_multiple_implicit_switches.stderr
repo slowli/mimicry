@@ -1,0 +1,5 @@
+error: Multiple fields with `RealCallSwitch` type. Mark the expected one with `#[mock(switch)]` attr
+ --> tests/ui/mock_with_multiple_implicit_switches.rs:9:5
+  |
+9 |     another_switch: RealCallSwitch,
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

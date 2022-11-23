@@ -2,7 +2,7 @@
 name = "mimicry"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.57"
+rust-version = "1.59"
 authors = ["Alex Ostrovski <ostrovski.alex@gmail.com>"]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
@@ -26,6 +26,8 @@ thread_local = "1.1.4"
 mimicry-derive = { version = "0.1.0", path = "derive" }
 
 [dev-dependencies]
+async-recursion = "1.0.0"
+async-std = { version = "1.12.0", features = ["attributes"] }
 doc-comment = "0.3.3"
 static_assertions = "1.1.0"
 version-sync = "0.9.4"

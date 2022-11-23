@@ -1,0 +1,9 @@
+error: No fields of `RealCallSwitch` type. Please add such a field, or, if it's present, mark it with `#[mock(switch)]` attr
+ --> tests/ui/mock_without_switches.rs:4:15
+  |
+4 |   struct MyMock {
+  |  _______________^
+5 | |     not_a_switch: String,
+6 | |     not_a_switch_either: u32,
+7 | | }
+  | |_^

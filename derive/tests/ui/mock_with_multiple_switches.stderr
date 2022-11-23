@@ -1,0 +1,6 @@
+error: Multiple `#[mock(switch)]` attrs; there should be no more than one
+  --> tests/ui/mock_with_multiple_switches.rs:10:5
+   |
+10 | /     #[mock(switch)]
+11 | |     another_switch: RealCallSwitch,
+   | |__________________________________^

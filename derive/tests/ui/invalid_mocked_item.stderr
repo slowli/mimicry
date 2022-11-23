@@ -1,0 +1,11 @@
+error: Item is not supported; use `#[mock] on functions, methods, or impl blocks
+ --> tests/ui/invalid_mocked_item.rs:4:1
+  |
+4 | pub struct Hello;
+  | ^^^^^^^^^^^^^^^^^
+
+error: Item is not supported; use `#[mock] on functions, methods, or impl blocks
+ --> tests/ui/invalid_mocked_item.rs:7:1
+  |
+7 | pub const ANSWER: u32 = 42;
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^

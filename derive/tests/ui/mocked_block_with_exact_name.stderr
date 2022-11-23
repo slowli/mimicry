@@ -1,0 +1,5 @@
+error: function specification is not supported for impl blocks; use the `rename` attr instead, such as `#[mock(using = "Mock", rename = "mock_{}")]
+ --> tests/ui/mocked_block_with_exact_name.rs:5:16
+  |
+5 | #[mock(using = "MyMock::test")]
+  |                ^^^^^^^^^^^^^^

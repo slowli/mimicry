@@ -1,0 +1,5 @@
+error: can only derive `CallReal` for structs
+ --> tests/ui/enum_mock.rs:4:1
+  |
+4 | enum MyMock {
+  | ^^^^

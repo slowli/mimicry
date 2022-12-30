@@ -339,10 +339,8 @@ pub trait Mock: Sized {
     }
 
     /// Locks write access to the mock state without setting the state. This is useful
-    /// for [shared mocks] to ensure that tests not using mocks do not observe mocks
+    /// for [shared mocks](Shared) to ensure that tests not using mocks do not observe mocks
     /// set by other tests.
-    ///
-    /// [shared mocks]: crate::Shared
     fn lock() -> EmptyGuard<Self>
     where
         Self::Shared: LockMock<'static, Self::Base>,
@@ -359,12 +357,10 @@ pub trait Mock: Sized {
 /// A guard can be used to check / adjust the mock state during the test.
 /// Dropping the guard also unsets the mock state, so that targeted functions are no longer mocked.
 ///
-/// In case of [shared mocks], guards also provided synchronization across concurrently
+/// In case of [shared mocks](Shared), guards also provided synchronization across concurrently
 /// executing tests: until a guard is dropped, other threads attempting
 /// to call [`Mock::set_as_mock()`] will block. Unfortunately, this is not always sufficient
-/// to have good results; see [`Shared`](crate::Shared) docs for discussion.
-///
-/// [shared mocks]: crate::Shared
+/// to have good results; see [`Shared`] docs for discussion.
 ///
 /// # Examples
 ///

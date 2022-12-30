@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"mimicry":[["impl&lt;T:&nbsp;<a class=\"trait\" href=\"mimicry/trait.Mock.html\" title=\"trait mimicry::Mock\">Mock</a>&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/marker/trait.Copy.html\" title=\"trait core::marker::Copy\">Copy</a> for <a class=\"struct\" href=\"mimicry/struct.MockRef.html\" title=\"struct mimicry::MockRef\">MockRef</a>&lt;T&gt;"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()

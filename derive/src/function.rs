@@ -100,7 +100,7 @@ impl FunctionWrapper {
         let iter = iter.map(|(i, arg)| {
             let span = arg.span();
             if let FnArg::Typed(pat_type) = arg {
-                let ident = Ident::new(&format!("__arg{}", i), span);
+                let ident = Ident::new(&format!("__arg{i}"), span);
                 let simple_pat = Box::new(Pat::Ident(PatIdent {
                     attrs: vec![],
                     by_ref: None,
@@ -342,7 +342,7 @@ mod tests {
         let err = FunctionWrapper::new(attrs, function)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("const functions"), "{}", err);
+        assert!(err.contains("const functions"), "{err}");
     }
 
     #[test]
@@ -419,8 +419,7 @@ mod tests {
         let err = ImplWrapper::new(attrs, block).unwrap_err().to_string();
         assert!(
             err.contains("function specification is not supported"),
-            "{}",
-            err
+            "{err}"
         );
     }
 }
